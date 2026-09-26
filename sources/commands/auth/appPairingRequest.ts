@@ -113,6 +113,11 @@ async function fetchWithRetry(
   let lastErrorType: "network" | "server" | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    // Checked before every attempt, so a signal that fires while we are
+    // sleeping between retries stops the loop instead of being noticed only
+    // after the next request has gone out.
+    throwIfAborted(init.signal);
+
     try {
       const response = await fetch(url, init);
 
@@ -132,6 +137,14 @@ async function fetchWithRetry(
 
       return response;
     } catch (error) {
+      // An abort is not a transient failure, so it must not be retried. The
+      // caller asked us to stop; retrying defeats the cancellation, spends the
+      // whole backoff schedule doing nothing, and then reports a connection
+      // problem that does not exist.
+      if (init.signal?.aborted) {
+        throw error;
+      }
+
       lastErrorType = "network";
       lastError =
         error instanceof Error
@@ -161,6 +174,17 @@ async function fetchWithRetry(
   }
 
   throw lastError ?? new Error("Request failed after multiple retries.");
+}
+
+// Rethrows the signal's own abort reason, so callers see what they asked for:
+// an AbortError from controller.abort(), a TimeoutError from
+// AbortSignal.timeout(). Note that a timeout does NOT produce an AbortError,
+// which is why this checks the signal rather than the error's name.
+function throwIfAborted(signal: AbortSignal | null | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason ?? new Error("The operation was aborted.");
 }
 
 function getBackoffDelay(attempt: number): number {
