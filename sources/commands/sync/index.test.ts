@@ -957,3 +957,119 @@ describe("sync regression", () => {
     expect(process.exitCode).toBe(1);
   });
 });
+
+describe("sync facts/todos honor --recent-days and --since (#14)", () => {
+  const DAY = 86_400_000;
+
+  function fact(id: number, text: string, createdAt: number) {
+    return { id, text, tags: [], created_at: createdAt, confirmed: true };
+  }
+
+  function todo(id: number, text: string, createdAt: number) {
+    return { id, text, alarm_at: null, completed: false, created_at: createdAt };
+  }
+
+  it("createdAfterCutoff reads --since as epoch ms or a v1 cursor, else --recent-days", () => {
+    const { createdAfterCutoff, parseSyncArgs } = __testing;
+    expect(createdAfterCutoff(parseSyncArgs(["--since", "1700000000000"]))).toBe(1_700_000_000_000);
+    expect(createdAfterCutoff(parseSyncArgs(["--since", "v1-1700000000000"]))).toBe(1_700_000_000_000);
+    expect(createdAfterCutoff(parseSyncArgs([]))).toBeUndefined();
+    const today = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+    expect(createdAfterCutoff(parseSyncArgs(["--recent-days", "1"]))).toBe(Date.parse(today));
+  });
+
+  it("--recent-days keeps recent facts and stops paging once a newest-first page is older", async () => {
+    const now = Date.now();
+    const outputDir = await makeTempDir();
+    const { context, requests } = proxyContext((request) => {
+      const url = new URL(request.url);
+      if (url.pathname !== "/v1/facts") return Response.json({});
+      const cursor = url.searchParams.get("cursor");
+      if (cursor === null) {
+        return Response.json({
+          facts: [fact(3, "fresh fact", now), fact(2, "day-old fact", now - DAY)],
+          next_cursor: "v1-2",
+        });
+      }
+      if (cursor === "v1-2") {
+        return Response.json({ facts: [fact(1, "ancient fact", now - 10 * DAY)], next_cursor: "v1-1" });
+      }
+      return Response.json({ facts: [fact(0, "never fetched", now - 20 * DAY)], next_cursor: null });
+    });
+
+    await syncCommand.run(["--output", outputDir, "--only", "facts", "--recent-days", "3"], context);
+
+    const md = readFileSync(path.join(outputDir, "facts.md"), "utf8");
+    expect(md).toContain("fresh fact");
+    expect(md).toContain("day-old fact");
+    expect(md).not.toContain("ancient fact");
+    expect(md).not.toContain("never fetched");
+    expect(requests.filter((r) => r.pathname === "/v1/facts")).toHaveLength(2);
+  });
+
+  it("--since (epoch ms) bounds todos and stops after the first older page", async () => {
+    const now = Date.now();
+    const outputDir = await makeTempDir();
+    const { context, requests } = proxyContext((request) => {
+      const url = new URL(request.url);
+      if (url.pathname !== "/v1/todos") return Response.json({});
+      return Response.json({
+        todos: [todo(9, "new todo", now), todo(8, "old todo", now - 10 * DAY)],
+        next_cursor: "v1-8",
+      });
+    });
+
+    await syncCommand.run(
+      ["--output", outputDir, "--only", "todos", "--since", String(now - 5 * DAY)],
+      context
+    );
+
+    const md = readFileSync(path.join(outputDir, "todos.md"), "utf8");
+    expect(md).toContain("new todo");
+    expect(md).not.toContain("old todo");
+    expect(requests.filter((r) => r.pathname === "/v1/todos")).toHaveLength(1);
+  });
+
+  it("pages that are not newest-first keep paging and are still filtered", async () => {
+    const now = Date.now();
+    const outputDir = await makeTempDir();
+    const { context, requests } = proxyContext((request) => {
+      const url = new URL(request.url);
+      if (url.pathname !== "/v1/facts") return Response.json({});
+      if (url.searchParams.get("cursor") === null) {
+        return Response.json({
+          facts: [fact(1, "old first", now - 10 * DAY), fact(2, "fresh second", now)],
+          next_cursor: "v1-5",
+        });
+      }
+      return Response.json({ facts: [fact(3, "fresh third", now - 3_600_000)], next_cursor: null });
+    });
+
+    await syncCommand.run(["--output", outputDir, "--only", "facts", "--recent-days", "3"], context);
+
+    const md = readFileSync(path.join(outputDir, "facts.md"), "utf8");
+    expect(md).toContain("fresh second");
+    expect(md).toContain("fresh third");
+    expect(md).not.toContain("old first");
+    expect(requests.filter((r) => r.pathname === "/v1/facts")).toHaveLength(2);
+  });
+
+  it("without --recent-days or --since every fact is still written", async () => {
+    const now = Date.now();
+    const outputDir = await makeTempDir();
+    const { context } = proxyContext((request) => {
+      const url = new URL(request.url);
+      if (url.pathname !== "/v1/facts") return Response.json({});
+      return Response.json({
+        facts: [fact(2, "fresh fact", now), fact(1, "ancient fact", now - 400 * DAY)],
+        next_cursor: null,
+      });
+    });
+
+    await syncCommand.run(["--output", outputDir, "--only", "facts"], context);
+
+    const md = readFileSync(path.join(outputDir, "facts.md"), "utf8");
+    expect(md).toContain("fresh fact");
+    expect(md).toContain("ancient fact");
+  });
+});
