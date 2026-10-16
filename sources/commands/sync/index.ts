@@ -411,6 +411,51 @@ function recentDaysFrom(days: number): string {
   return start.toISOString().slice(0, 10);
 }
 
+// Facts and todos are always re-fetched in full and their list endpoints take no
+// date filter, so --since / --recent-days bound them client-side by created_at.
+function createdAfterCutoff(options: SyncOptions): number | undefined {
+  if (options.since !== undefined) {
+    if (/^\d+$/.test(options.since)) {
+      return Number(options.since);
+    }
+    const fromCursor = cursorEpochMs(options.since);
+    if (fromCursor !== null) {
+      return fromCursor;
+    }
+  }
+  if (options.recentDays !== undefined) {
+    return Date.parse(`${recentDaysFrom(options.recentDays)}T00:00:00Z`);
+  }
+  return undefined;
+}
+
+function keepCreatedSince<T extends { created_at: number }>(
+  items: T[],
+  cutoff: number | undefined
+): T[] {
+  return cutoff === undefined ? items : items.filter((item) => item.created_at >= cutoff);
+}
+
+// Stop paging once a newest-first page reaches the cutoff. A page that is not
+// newest-first never stops paging; the filter alone keeps the result correct.
+function pageEndsBefore(
+  items: { created_at: number }[],
+  cutoff: number | undefined
+): boolean {
+  const last = items[items.length - 1];
+  if (cutoff === undefined || last === undefined) {
+    return false;
+  }
+  for (let i = 1; i < items.length; i += 1) {
+    const previous = items[i - 1];
+    const current = items[i];
+    if (previous !== undefined && current !== undefined && previous.created_at < current.created_at) {
+      return false;
+    }
+  }
+  return last.created_at < cutoff;
+}
+
 function parseTargets(value: string): SyncTarget[] {
   const parts = value
     .split(",")
@@ -721,14 +766,16 @@ async function syncAll(
   const syncPromises: Promise<void>[] = [];
   const outcomes: Partial<Record<ChangefeedTarget, TargetSyncOutcome>> = {};
 
+  const createdAfter = createdAfterCutoff(options);
+
   if (options.targets.has("facts")) {
     const task = progress.addTask("facts");
-    syncPromises.push(syncFacts(context, options.outputDir, task));
+    syncPromises.push(syncFacts(context, options.outputDir, task, createdAfter));
   }
 
   if (options.targets.has("todos")) {
     const task = progress.addTask("todos");
-    syncPromises.push(syncTodos(context, options.outputDir, task));
+    syncPromises.push(syncTodos(context, options.outputDir, task, createdAfter));
   }
 
   if (options.targets.has("daily")) {
@@ -959,9 +1006,10 @@ async function persistManifest(
 async function syncFacts(
   context: CommandContext,
   outputDir: string,
-  task: ProgressTask
+  task: ProgressTask,
+  createdAfter?: number
 ): Promise<void> {
-  const facts = await fetchAllFacts(context, task);
+  const facts = await fetchAllFacts(context, task, createdAfter);
   await writeFactsMarkdown(outputDir, facts);
   task.setLabel("facts done");
   task.complete();
@@ -970,9 +1018,10 @@ async function syncFacts(
 async function syncTodos(
   context: CommandContext,
   outputDir: string,
-  task: ProgressTask
+  task: ProgressTask,
+  createdAfter?: number
 ): Promise<void> {
-  const todos = await fetchAllTodos(context, task);
+  const todos = await fetchAllTodos(context, task, createdAfter);
   await writeTodosMarkdown(outputDir, todos);
   task.setLabel("todos done");
   task.complete();
@@ -1250,7 +1299,8 @@ function conversationSortKey(conversation: ConversationSummary): number {
 
 async function fetchAllFacts(
   context: CommandContext,
-  task: ProgressTask
+  task: ProgressTask,
+  createdAfter?: number
 ): Promise<Fact[]> {
   const items: Fact[] = [];
   let cursor: string | undefined;
@@ -1265,9 +1315,10 @@ async function fetchAllFacts(
     const apiPath = params.toString() ? `/v1/facts?${params}` : "/v1/facts";
     const data = await requestClientJson(context, apiPath, { method: "GET" });
     const payload = parseFactsList(data);
-    items.push(...payload.facts);
-    task.advance(payload.facts.length);
-    if (!payload.next_cursor) {
+    const kept = keepCreatedSince(payload.facts, createdAfter);
+    items.push(...kept);
+    task.advance(kept.length);
+    if (!payload.next_cursor || pageEndsBefore(payload.facts, createdAfter)) {
       break;
     }
     task.addTotal(1);
@@ -1279,7 +1330,8 @@ async function fetchAllFacts(
 
 async function fetchAllTodos(
   context: CommandContext,
-  task: ProgressTask
+  task: ProgressTask,
+  createdAfter?: number
 ): Promise<Todo[]> {
   const items: Todo[] = [];
   let cursor: string | undefined;
@@ -1294,9 +1346,10 @@ async function fetchAllTodos(
     const apiPath = params.toString() ? `/v1/todos?${params}` : "/v1/todos";
     const data = await requestClientJson(context, apiPath, { method: "GET" });
     const payload = parseTodosList(data);
-    items.push(...payload.todos);
-    task.advance(payload.todos.length);
-    if (!payload.next_cursor) {
+    const kept = keepCreatedSince(payload.todos, createdAfter);
+    items.push(...kept);
+    task.advance(kept.length);
+    if (!payload.next_cursor || pageEndsBefore(payload.todos, createdAfter)) {
       break;
     }
     task.addTotal(1);
@@ -1820,5 +1873,6 @@ export const __testing = {
   persistCursor,
   accountFingerprint,
   normalizeSinceCursor,
+  createdAfterCutoff,
   CHANGES_OVERLAP_MS,
 };
