@@ -434,20 +434,20 @@ bee sync [--output <dir>] [--recent-days N] [--only <facts|todos|daily|conversat
 
 After a first sync, re-running `bee sync` on the same output directory is
 **incremental**: it re-fetches only the daily summaries and conversations that
-have changed since the last run (facts and todos are always re-fetched in full,
-since they are small). Sync state is tracked in a `.bee-sync.json` manifest
-inside the output directory; delete it (or the directory) to force a full
-re-sync.
+have changed since the last run (facts and todos are re-fetched on every run,
+in full unless `--recent-days` or `--since` limits them). Sync state is tracked
+in a `.bee-sync.json` manifest inside the output directory; delete it (or the
+directory) to force a full re-sync.
 
 ### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--output <dir>` | `bee-sync` | Output directory for synced files |
-| `--recent-days N` | all | Limit daily summaries and conversations to the last N days (facts and todos are always synced in full). Applies to full syncs only; ignored on an incremental run |
+| `--recent-days N` | all | Limit daily summaries and conversations to the last N days; applies to full syncs only, ignored on an incremental run. Also limits facts and todos to those created in the last N days, on every run |
 | `--only <targets>` | all | Limit sync to a comma-separated list: `facts`, `todos`, `daily`, `conversations` (or `all`) |
 | `--full` | off | Force a complete re-sync, ignoring the saved manifest, and rewrite it with fresh cursors |
-| `--since <epochMs>` | — | Advanced/recovery: override the saved incremental cursor with an explicit epoch-milliseconds timestamp for changefeed-driven targets |
+| `--since <epochMs>` | — | Advanced/recovery: override the saved incremental cursor with an explicit epoch-milliseconds timestamp for changefeed-driven targets. Also limits facts and todos to those created after it |
 
 ### Output Structure
 
@@ -619,7 +619,7 @@ Sync only specific data:
 bee sync --only facts,todos
 ```
 
-Limit daily summaries and conversations to the last 7 days:
+Limit daily summaries, conversations, facts and todos to the last 7 days:
 
 ```bash
 bee sync --recent-days 7
@@ -627,7 +627,7 @@ bee sync --recent-days 7
 
 ### Notes
 
-- The first sync (or `--full`) fetches everything; facts and todos are always re-fetched in full
+- The first sync (or `--full`) fetches everything; facts and todos are re-fetched on every run, limited by `--recent-days` or `--since` when given (their files then hold only the matching items)
 - Re-runs are incremental: only daily summaries and conversations that changed since the last run are re-fetched, tracked via the `.bee-sync.json` manifest in the output directory
 - Conversations and daily summaries are fetched concurrently for faster syncing
 - All timestamps are in ISO 8601 format (UTC)
