@@ -80,6 +80,11 @@ export function createBeeCliRunner(options: BeeCliOptions = {}): BeeCliRunner {
       env: buildEnv(),
       stdio,
       signal: spawnOptions.signal,
+      // On Windows a bare command name resolves to bee.cmd through PATHEXT,
+      // and since the Node fix for CVE-2024-27980 spawn refuses to launch a
+      // .cmd without a shell. Without this, every method on api, auth and sse
+      // fails on Windows with "spawn bee ENOENT".
+      shell: process.platform === "win32",
     });
 
     const exited = new Promise<number>((resolve, reject) => {
