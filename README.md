@@ -422,6 +422,36 @@ Payload:
 }
 ```
 
+## Notes for integrators
+
+Things worth knowing when you build a long-running program on top of `bee proxy` and `bee stream` (checked against CLI 0.8.0).
+
+### Content-Type on writes through the proxy
+
+Write requests (`POST`, `PUT`) sent through `bee proxy` with a bare `Content-Type: application/json` were rejected with `415 Unsupported Media Type` (`FST_ERR_CTP_INVALID_MEDIA_TYPE`). Adding a charset made them succeed:
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/todos \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  -d '{"text":"Call dentist"}'
+```
+
+### Unix socket path on Windows
+
+The default socket path is `~/.bee/proxy.sock`. If `~/.bee` does not exist, `bee proxy --socket` exits with `ENOENT` (seen on Windows 11). Pass an explicit path (`bee proxy --socket C:/path/to/bee.sock` worked), or use `--port`.
+
+### Long lines from `bee stream --json`
+
+`bee stream --json` prints one JSON event per line. If you read it from a subprocess, raise your reader's line limit instead of relying on the default. A long-running Python consumer using asyncio's default 64 KiB limit crashed once with `ValueError: Separator is not found, and chunk exceed the limit` (we could not tell which event type produced the line):
+
+```python
+proc = await asyncio.create_subprocess_exec(
+    "bee", "stream", "--json",
+    stdout=asyncio.subprocess.PIPE,
+    limit=16 * 1024 * 1024,
+)
+```
+
 ## Sync Command
 
 The `sync` command exports all your Bee data to a local directory as markdown files.
