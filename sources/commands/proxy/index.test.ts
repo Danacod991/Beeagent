@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommandContext } from "@/commands/types";
@@ -118,5 +118,41 @@ describe("proxy command", () => {
     expect(response.ok).toBe(true);
     expect(seenPath).toBe("/v1/me");
     expect(seenAuthorization ?? "").toBe("Bearer proxy-test-token");
+  });
+
+  it("creates the socket's parent directory when it does not exist", async () => {
+    await saveToken("prod", "proxy-test-token");
+
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => Response.json({ ok: true }),
+    });
+    activeServers.push(upstream);
+
+    const baseUrl = `http://127.0.0.1:${upstream.port}`;
+    const context: CommandContext = {
+      env: "prod",
+      client: {
+        env: "prod",
+        baseUrl,
+        isProxy: false,
+        fetch: (path, init) => fetch(new URL(path, baseUrl), init),
+      },
+    };
+
+    const socketDir = join(tempDir, "missing", "nested");
+    const socketPath = join(socketDir, "proxy.sock");
+    expect(existsSync(socketDir)).toBe(false);
+
+    const proxy = await startProxy(context, { socketPath });
+    activeServers.push(proxy);
+
+    expect(existsSync(socketDir)).toBe(true);
+    const response = await fetch("http://localhost/v1/me", {
+      method: "GET",
+      unix: socketPath,
+    } as RequestInit & { unix: string });
+    expect(response.ok).toBe(true);
   });
 });
