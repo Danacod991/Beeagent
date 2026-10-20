@@ -258,12 +258,18 @@ Payload:
 ```json
 {
   "utterance": {
+    "id": 123456,
+    "sample_id": "uuid-string",
+    "start": 7.26,
+    "end": 9.76,
     "text": "Hello there",
-    "speaker": "speaker_1"
+    "spoken_at": "2024-01-15T09:00:00.000Z"
   },
   "conversation_uuid": "uuid-string"
 }
 ```
+
+The payload has no `speaker` field, so the pretty and `--agent` formats show the speaker as `unknown`.
 
 ### new-conversation
 
@@ -424,25 +430,19 @@ Payload:
 
 ## Notes for integrators
 
-Things worth knowing when you build a long-running program on top of `bee proxy` and `bee stream` (checked against CLI 0.8.0).
+Notes for programs that run on top of `bee proxy` and `bee stream`.
 
 ### Content-Type on writes through the proxy
 
-Write requests (`POST`, `PUT`) sent through `bee proxy` with a bare `Content-Type: application/json` were rejected with `415 Unsupported Media Type` (`FST_ERR_CTP_INVALID_MEDIA_TYPE`). Adding a charset made them succeed:
+Write requests through `bee proxy` need `Content-Type: application/json; charset=utf-8`; a bare `application/json` is rejected with 415 (`FST_ERR_CTP_INVALID_MEDIA_TYPE`).
 
 ```bash
-curl -X POST http://127.0.0.1:8787/v1/todos \
-  -H 'Content-Type: application/json; charset=utf-8' \
-  -d '{"text":"Call dentist"}'
+curl -X POST http://127.0.0.1:8787/v1/todos   -H 'Content-Type: application/json; charset=utf-8'   -d '{"text":"Call dentist"}'
 ```
-
-### Unix socket path on Windows
-
-The default socket path is `~/.bee/proxy.sock`. If `~/.bee` does not exist, `bee proxy --socket` exits with `ENOENT` (seen on Windows 11). Pass an explicit path (`bee proxy --socket C:/path/to/bee.sock` worked), or use `--port`.
 
 ### Long lines from `bee stream --json`
 
-`bee stream --json` prints one JSON event per line. If you read it from a subprocess, raise your reader's line limit instead of relying on the default. A long-running Python consumer using asyncio's default 64 KiB limit crashed once with `ValueError: Separator is not found, and chunk exceed the limit` (we could not tell which event type produced the line):
+Each event is one line, and lines are not size-limited; a line has exceeded 64 KiB in practice. Raise your reader's line limit when reading the stream from a subprocess.
 
 ```python
 proc = await asyncio.create_subprocess_exec(
