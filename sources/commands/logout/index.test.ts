@@ -3,7 +3,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommandContext } from "@/commands/types";
-import { loadProxyConfig, loadToken, saveProxyConfig, saveToken } from "@/secureStore";
+import {
+  loadPairingState,
+  loadProxyConfig,
+  loadToken,
+  savePairingState,
+  saveProxyConfig,
+  saveToken,
+} from "@/secureStore";
 import { logoutCommand } from "./index";
 
 describe("logout command", () => {
@@ -51,5 +58,30 @@ describe("logout command", () => {
 
     await expect(loadToken("prod")).resolves.toBeNull();
     await expect(loadProxyConfig("prod")).resolves.toBeNull();
+  });
+
+  it("drops an unfinished login so 'bee status' cannot finish it later", async () => {
+    await savePairingState("prod", {
+      appId: "test-app",
+      publicKey: "test-public-key",
+      secretKey: "test-secret-key",
+      requestId: "req-123",
+      pairingUrl: "https://bee.computer/connect#req-123",
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    });
+
+    const context: CommandContext = {
+      env: "prod",
+      client: {
+        env: "prod",
+        baseUrl: "http://127.0.0.1",
+        isProxy: false,
+        fetch: async () => new Response("ok"),
+      },
+    };
+
+    await logoutCommand.run([], context);
+
+    await expect(loadPairingState("prod")).resolves.toBeNull();
   });
 });
