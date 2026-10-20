@@ -125,11 +125,31 @@ export type PairingState = {
   expiresAt: string;
 };
 
+const PAIRING_STATE_FIELDS: ReadonlyArray<keyof PairingState> = [
+  "appId",
+  "publicKey",
+  "secretKey",
+  "requestId",
+  "pairingUrl",
+  "expiresAt",
+];
+
+// A saved pairing request is usable only with every field present. Anything
+// else, such as a truncated or hand-edited entry, counts as no saved request.
+function toPairingState(value: unknown): PairingState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const fields = value as Record<string, unknown>;
+  const complete = PAIRING_STATE_FIELDS.every((field) => typeof fields[field] === "string");
+  return complete ? (value as PairingState) : null;
+}
+
 function loadPairingStateFromFile(env: Environment): PairingState | null {
   const path = getPairingFilePath(env);
   if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as PairingState;
+    return toPairingState(JSON.parse(readFileSync(path, "utf-8")));
   } catch {
     return null;
   }
@@ -158,7 +178,7 @@ export async function loadPairingState(env: Environment): Promise<PairingState |
     try {
       const value = await Bun.secrets.get(pairingStateKey(env));
       if (typeof value === "string" && value.trim().length > 0) {
-        return parseJson<PairingState>(value);
+        return toPairingState(parseJson<unknown>(value));
       }
     } catch (err) {
       handleKeychainError(err);

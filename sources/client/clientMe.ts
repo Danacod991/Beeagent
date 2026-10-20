@@ -4,7 +4,7 @@ import {
   ServerError,
 } from "@/commands/auth/appPairingRequest";
 
-type ClientUser = {
+export type ClientUser = {
   id: number;
   first_name: string;
   last_name: string | null;

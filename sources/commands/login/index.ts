@@ -17,7 +17,7 @@ import {
   generateAppPairingKeyPair,
 } from "@/utils/appPairingCrypto";
 import { renderQrCode } from "@/utils/qrCode";
-import { fetchClientMe } from "@/client/clientMe";
+import { fetchClientMe, type ClientUser } from "@/client/clientMe";
 import { isSocketPath, normalizeProxyAddress } from "@/utils/proxyAddress";
 
 type LoginOptions = {
@@ -130,11 +130,20 @@ async function handleLogin(
 
   token = token.trim();
 
-  const user = await fetchClientMe(apiContext, token);
-
-  await saveToken(context.env, token);
+  const user = await verifyAndSaveToken(apiContext, token);
 
   printSuccessMessage(user);
+}
+
+// Checks the token against /v1/me, then stores it. Shared with `bee status`,
+// which finishes a pending `--no-wait` login the same way.
+async function verifyAndSaveToken(
+  context: CommandContext,
+  token: string
+): Promise<ClientUser> {
+  const user = await fetchClientMe(context, token);
+  await saveToken(context.env, token);
+  return user;
 }
 
 function printSuccessMessage(user: {
@@ -370,23 +379,16 @@ async function loginWithAppPairing(
   const existingState = await loadPairingState(context.env);
 
   if (existingState) {
-    const expiresAtMs = Date.parse(existingState.expiresAt);
-    const isExpired = !Number.isNaN(expiresAtMs) && Date.now() >= expiresAtMs;
-
-    if (!isExpired) {
+    if (!isPairingExpired(existingState)) {
       await printWelcomeMessage(existingState.pairingUrl, existingState.expiresAt, "resumed", useQr, noWait);
 
       if (noWait) {
         return null;
       }
 
-      const secretKey = Buffer.from(existingState.secretKey, "base64");
       try {
         const token = await pollForAppToken({
-          env: context.env,
-          appId: existingState.appId,
-          publicKey: existingState.publicKey,
-          secretKey: new Uint8Array(secretKey),
+          ...savedPairing(context.env, existingState),
           expiresAt: existingState.expiresAt,
         });
         await clearPairingState(context.env);
@@ -449,13 +451,72 @@ async function loginWithAppPairing(
   }
 }
 
-async function pollForAppToken(opts: {
+export type PendingLogin =
+  | { status: "none" }
+  | { status: "pending"; pairingUrl: string; expiresAt: string }
+  | { status: "expired" }
+  | { status: "completed"; token: string; user: ClientUser };
+
+// Checks the pairing request saved by an unfinished `bee login` (for example one
+// run with --no-wait) once, without waiting. If the device owner approved it,
+// finishes the login the way `bee login` does: clears the saved pairing state,
+// then verifies and stores the token. An expired request is cleared too. If the
+// check itself fails, the error propagates and the saved state is kept.
+export async function finishPendingLogin(
+  context: CommandContext
+): Promise<PendingLogin> {
+  const state = await loadPairingState(context.env);
+  if (!state) {
+    return { status: "none" };
+  }
+
+  if (isPairingExpired(state)) {
+    await clearPairingState(context.env);
+    return { status: "expired" };
+  }
+
+  const outcome = await checkAppPairing(savedPairing(context.env, state));
+  if (outcome.status === "pending") {
+    return {
+      status: "pending",
+      pairingUrl: state.pairingUrl,
+      expiresAt: state.expiresAt,
+    };
+  }
+
+  await clearPairingState(context.env);
+  if (outcome.status === "expired") {
+    return { status: "expired" };
+  }
+
+  const user = await verifyAndSaveToken(context, outcome.token);
+  return { status: "completed", token: outcome.token, user };
+}
+
+type SavedPairing = {
   env: Environment;
   appId: string;
   publicKey: string;
   secretKey: Uint8Array;
-  expiresAt: string;
-}): Promise<string> {
+};
+
+function savedPairing(env: Environment, state: PairingState): SavedPairing {
+  return {
+    env,
+    appId: state.appId,
+    publicKey: state.publicKey,
+    secretKey: new Uint8Array(Buffer.from(state.secretKey, "base64")),
+  };
+}
+
+function isPairingExpired(state: PairingState): boolean {
+  const expiresAtMs = Date.parse(state.expiresAt);
+  return !Number.isNaN(expiresAtMs) && Date.now() >= expiresAtMs;
+}
+
+async function pollForAppToken(
+  opts: SavedPairing & { expiresAt: string }
+): Promise<string> {
   const expiresAtMs = Date.parse(opts.expiresAt);
   const deadline =
     Number.isNaN(expiresAtMs) || expiresAtMs <= 0
@@ -464,16 +525,9 @@ async function pollForAppToken(opts: {
   const intervalMs = 2000;
 
   while (Date.now() < deadline) {
-    const outcome = await requestAppPairing(
-      opts.env,
-      opts.appId,
-      opts.publicKey
-    );
+    const outcome = await checkAppPairing(opts);
     if (outcome.status === "completed") {
-      return decryptAppPairingToken(
-        outcome.encryptedToken,
-        opts.secretKey
-      );
+      return outcome.token;
     }
     if (outcome.status === "expired") {
       throw new Error("Pairing request expired. Please try again.");
@@ -482,6 +536,28 @@ async function pollForAppToken(opts: {
   }
 
   throw new Error("Login timed out. Please try again.");
+}
+
+// One poll of the pairing request: the decrypted token once it is approved.
+async function checkAppPairing(
+  opts: SavedPairing
+): Promise<
+  | { status: "completed"; token: string }
+  | { status: "pending" }
+  | { status: "expired" }
+> {
+  const outcome = await requestAppPairing(
+    opts.env,
+    opts.appId,
+    opts.publicKey
+  );
+  if (outcome.status === "completed") {
+    return {
+      status: "completed",
+      token: decryptAppPairingToken(outcome.encryptedToken, opts.secretKey),
+    };
+  }
+  return { status: outcome.status };
 }
 
 function buildPairingUrl(requestId: string): string {
@@ -510,10 +586,6 @@ async function printWelcomeMessage(
   useQr: boolean,
   noWait: boolean
 ): Promise<void> {
-  const expiresAtMs = Date.parse(expiresAt);
-  const remainingMs = expiresAtMs - Date.now();
-  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
-
   console.log("Welcome to Bee AI!");
   console.log("");
   console.log("NOTE: To use the CLI, you must have the latest Bee app installed");
@@ -558,9 +630,7 @@ async function printWelcomeMessage(
     "Once the link is opened, follow the instructions to approve the connection."
   );
   console.log("");
-  console.log(
-    `This authentication request will expire in approximately ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"}.`
-  );
+  console.log(describePairingExpiry(expiresAt));
   console.log(
     "You can safely stop this process and restart it later to continue from where you left off,"
   );
@@ -572,4 +642,10 @@ async function printWelcomeMessage(
   } else {
     console.log("Now waiting for you to approve the connection using the link above...");
   }
+}
+
+export function describePairingExpiry(expiresAt: string): string {
+  const remainingMs = Date.parse(expiresAt) - Date.now();
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  return `This authentication request will expire in approximately ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"}.`;
 }
