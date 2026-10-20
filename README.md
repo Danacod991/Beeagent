@@ -442,7 +442,7 @@ curl -X POST http://127.0.0.1:8787/v1/todos   -H 'Content-Type: application/json
 
 ### Long lines from `bee stream --json`
 
-Each event is one line, and lines are not size-limited; a line has exceeded 64 KiB in practice. Raise your reader's line limit when reading the stream from a subprocess.
+`bee stream --json` writes each event whole, on one line, so lines can be long; one has exceeded 64 KiB in practice (Python's asyncio raised `Separator is not found, and chunk exceed the limit`). Raise your reader's line limit when reading the stream from a subprocess.
 
 ```python
 proc = await asyncio.create_subprocess_exec(
