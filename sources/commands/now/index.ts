@@ -1,5 +1,6 @@
 import type { Command, CommandContext } from "@/commands/types";
 import { printJson, requestClientJson } from "@/client/clientApi";
+import { parsePositiveInt } from "@/commands/mcpToolOutput";
 import {
   formatDateValue,
   formatTimeZoneHeader,
@@ -7,8 +8,9 @@ import {
   resolveTimeZone,
 } from "@/utils/markdown";
 
-const USAGE = "bee now [--json]";
-const WINDOW_HOURS = 10;
+const USAGE = "bee now [--hours N] [--json]";
+const DEFAULT_WINDOW_HOURS = 10;
+const MAX_WINDOW_HOURS = 168;
 const PAGE_SIZE = 100;
 
 export const nowCommand: Command = {
@@ -17,12 +19,10 @@ export const nowCommand: Command = {
   usage: USAGE,
   run: async (args, context) => {
     const { format, args: remaining } = parseOutputFlag(args);
-    if (remaining.length > 0) {
-      throw new Error(`Unexpected arguments: ${remaining.join(" ")}`);
-    }
+    const windowHours = parseWindowHours(remaining);
 
     const nowMs = Date.now();
-    const sinceMs = nowMs - WINDOW_HOURS * 60 * 60 * 1000;
+    const sinceMs = nowMs - windowHours * 60 * 60 * 1000;
 
     const list = await fetchRecentConversationSummaries(context, sinceMs);
     const timeZone = resolveTimeZone(list.timezone);
@@ -46,7 +46,8 @@ export const nowCommand: Command = {
     const lines: string[] = ["# Now", "", formatTimeZoneHeader(timeZone), ""];
 
     if (sorted.length === 0) {
-      lines.push("- (none)", "");
+      const unit = windowHours === 1 ? "hour" : "hours";
+      lines.push(`- (none in the last ${windowHours} ${unit})`, "");
       console.log(lines.join("\n"));
       return;
     }
@@ -61,6 +62,19 @@ export const nowCommand: Command = {
     console.log(lines.join("\n"));
   },
 };
+
+function parseWindowHours(args: readonly string[]): number {
+  let hours = DEFAULT_WINDOW_HOURS;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === "--hours") {
+      hours = parsePositiveInt(args[i + 1], "--hours", MAX_WINDOW_HOURS);
+      i += 1;
+      continue;
+    }
+    throw new Error(`Unexpected arguments: ${args.slice(i).join(" ")}`);
+  }
+  return hours;
+}
 
 type ConversationSummary = {
   id: number;

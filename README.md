@@ -118,7 +118,7 @@ By default, data commands return markdown. Use `--json` to print raw JSON.
 
 - `today` - Fetch today's brief (calendar events and emails). Use `--context` for Bee wearable context (daily summary, active todos, notes, conversations) instead, and `--json` for JSON output.
 
-- `now` - Fetch conversations from the last 10 hours with utterances. Use `--json` for JSON output.
+- `now` - Fetch conversations from the last 10 hours with utterances. Use `--hours N` (1-168) to change the window and `--json` for JSON output.
 
 - `activity` - Show recent activity across conversations, summaries, notes, todos, and insights. Options: `--limit N`, `--json`.
 
