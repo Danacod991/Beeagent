@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLoginArgs, validateProxyConnection } from "./index";
+import nacl from "tweetnacl";
+import { createDeveloperClient } from "@/client";
+import { loadPairingState, loadToken, savePairingState } from "@/secureStore";
+import { generateAppPairingKeyPair } from "@/utils/appPairingCrypto";
+import { loginCommand, parseLoginArgs, validateProxyConnection } from "./index";
 
 type BunServer = ReturnType<typeof Bun.serve>;
 
@@ -114,5 +118,94 @@ describe("login command", () => {
       first_name: "Socket",
       last_name: null,
     });
+  });
+});
+
+// Bee's APIs are replaced by a stub of global fetch, so nothing leaves the machine.
+describe("login command with an unfinished login", () => {
+  const PAIRING_API = "https://auth.beeai-services.com/apps/pairing/request";
+  const ME_API = "https://app-api-developer.ce.bee.amazon.dev/v1/me";
+  const originalConfigDir = process.env["BEE_CONFIG_DIR"];
+  const originalForceFileStore = process.env["BEE_FORCE_FILE_STORE"];
+
+  beforeEach(() => {
+    const dir = mkdtempSync(join(tmpdir(), "bee-cli-login-pending-"));
+    cleanupPaths.push(dir);
+    process.env["BEE_CONFIG_DIR"] = dir;
+    process.env["BEE_FORCE_FILE_STORE"] = "1";
+  });
+
+  afterEach(() => {
+    if (originalConfigDir === undefined) {
+      delete process.env["BEE_CONFIG_DIR"];
+    } else {
+      process.env["BEE_CONFIG_DIR"] = originalConfigDir;
+    }
+    if (originalForceFileStore === undefined) {
+      delete process.env["BEE_FORCE_FILE_STORE"];
+    } else {
+      process.env["BEE_FORCE_FILE_STORE"] = originalForceFileStore;
+    }
+  });
+
+  it("resumes an approved login, stores the token, and clears the pairing state", async () => {
+    const keyPair = generateAppPairingKeyPair();
+    await savePairingState("prod", {
+      appId: "test-app",
+      publicKey: keyPair.publicKeyBase64,
+      secretKey: Buffer.from(keyPair.secretKey).toString("base64"),
+      requestId: "req-123",
+      pairingUrl: "https://bee.computer/connect#req-123",
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    });
+
+    // The pairing API encrypts the token for the CLI's key: a version byte, the
+    // nonce, a one-time sender public key, then the ciphertext.
+    const sender = nacl.box.keyPair();
+    const nonce = nacl.randomBytes(nacl.box.nonceLength);
+    const ciphertext = nacl.box(
+      new TextEncoder().encode("test-token-0001"),
+      nonce,
+      keyPair.publicKeyBytes,
+      sender.secretKey
+    );
+    const encryptedToken = Buffer.concat([
+      Buffer.from([1]),
+      nonce,
+      sender.publicKey,
+      ciphertext,
+    ]).toString("base64");
+
+    const requested: string[] = [];
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requested.push(url);
+      if (url === PAIRING_API) {
+        return Response.json({
+          ok: true,
+          status: "completed",
+          requestId: "req-123",
+          result: { encryptedToken },
+        });
+      }
+      if (url === ME_API) {
+        return Response.json({ id: 42, first_name: "Test", last_name: "User" });
+      }
+      // A 400 is not retried, so a wrong URL fails fast instead of retrying
+      // until the stub is gone and the request reaches the real host.
+      return Response.json({ error: `Unexpected request to ${url}` }, { status: 400 });
+    }) as typeof fetch);
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await loginCommand.run([], { env: "prod", client: createDeveloperClient("prod") });
+    } finally {
+      logSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+
+    expect(requested).toEqual([PAIRING_API, ME_API]);
+    await expect(loadToken("prod")).resolves.toBe("test-token-0001");
+    await expect(loadPairingState("prod")).resolves.toBeNull();
   });
 });

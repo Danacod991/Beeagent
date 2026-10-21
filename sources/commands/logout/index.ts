@@ -1,5 +1,5 @@
 import type { Command, CommandContext } from "@/commands/types";
-import { clearProxyConfig, clearToken } from "@/secureStore";
+import { clearPairingState, clearProxyConfig, clearToken } from "@/secureStore";
 
 const USAGE = "bee logout";
 
@@ -21,5 +21,7 @@ async function handleLogout(
   }
   await clearProxyConfig(context.env);
   await clearToken(context.env);
+  // Also drop an unfinished `bee login`, so `bee status` cannot finish it later.
+  await clearPairingState(context.env);
   console.log("Logged out.");
 }
