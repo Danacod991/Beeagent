@@ -258,12 +258,18 @@ Payload:
 ```json
 {
   "utterance": {
+    "id": 123456,
+    "sample_id": "uuid-string",
+    "start": 7.26,
+    "end": 9.76,
     "text": "Hello there",
-    "speaker": "speaker_1"
+    "spoken_at": "2024-01-15T09:00:00.000Z"
   },
   "conversation_uuid": "uuid-string"
 }
 ```
+
+The payload has no `speaker` field, so the pretty and `--agent` formats show the speaker as `unknown`.
 
 ### new-conversation
 
@@ -420,6 +426,30 @@ Payload:
   "journalId": 55,
   "text": "Optional raw text"
 }
+```
+
+## Notes for integrators
+
+Notes for programs that run on top of `bee proxy` and `bee stream`.
+
+### Content-Type on writes through the proxy
+
+Write requests through `bee proxy` need `Content-Type: application/json; charset=utf-8`; a bare `application/json` is rejected with 415 (`FST_ERR_CTP_INVALID_MEDIA_TYPE`).
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/todos   -H 'Content-Type: application/json; charset=utf-8'   -d '{"text":"Call dentist"}'
+```
+
+### Long lines from `bee stream --json`
+
+`bee stream --json` writes each event whole, on one line, so lines can be long; one has exceeded 64 KiB in practice (Python's asyncio raised `Separator is not found, and chunk exceed the limit`). Raise your reader's line limit when reading the stream from a subprocess.
+
+```python
+proc = await asyncio.create_subprocess_exec(
+    "bee", "stream", "--json",
+    stdout=asyncio.subprocess.PIPE,
+    limit=16 * 1024 * 1024,
+)
 ```
 
 ## Sync Command
