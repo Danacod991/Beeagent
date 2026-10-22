@@ -468,6 +468,58 @@ bee-sync/
         └── 789.md        # Individual insight files
 ```
 
+### Managed exports and reconciliation (opt-in)
+
+An exported conversation or insight can remain on disk when a later Bee scan no
+longer returns it. That is useful for a retained archive, but a tool that searches
+those files can keep finding the old content. Managed mode lets you review which
+unchanged exports should leave the active tree, with an offline restore path.
+
+**Try it without a Bee account.** From a source checkout with Bun installed:
+
+```bash
+bun install --frozen-lockfile
+bun run build
+bun scripts/demo-managed-search.ts
+```
+
+The synthetic example runs the compiled CLI against localhost with disposable
+configuration. Expect one search result after export, refresh and preview; zero
+after apply; and one again after offline restore. Local edits and an unrelated
+note survive. It cleans up its temporary files. See the
+[example walkthrough](docs/managed-search-example.md) for the search scope and
+the [maintainer review route](docs/managed-sync-review.md) for focused checks.
+
+**Use managed mode with your account.** Start a separate output directory:
+
+```bash
+# Export or refresh; retain paths absent from the new scan.
+bee sync --managed --output ./bee-managed-export
+# Review the candidate paths and preserved conflicts in the printed plan.
+bee sync --reconcile --output ./bee-managed-export
+# Use the exact plan ID only after reviewing it.
+bee sync --apply PLAN_ID --output ./bee-managed-export
+# Recover quarantined files locally, without a Bee request.
+bee sync --restore PLAN_ID --output ./bee-managed-export
+```
+
+Managed mode covers all five Bee CLI 0.9.0 export targets: facts, todos, daily
+summaries, conversations and insights. It tracks files it writes and preserves
+unknown or locally edited files. Export, preview and apply each require a full,
+unfiltered scan. Absence does not prove server deletion. Apply revalidates the
+exact plan before moving unchanged candidates into private quarantine; restore
+never overwrites an occupied path. Quarantine remains a copy of the content, and
+existing search indexes or caches need their own handling.
+
+Ordinary sync retains its rendering and incremental behavior and refuses managed
+directories. Both modes serialize cooperating writers and require a real output
+directory; a symlink used as the output directory is rejected. The
+[managed sync guide](docs/managed-sync.md) covers migration, conflicts, aggregate
+files, interruption recovery and scan bounds.
+
+Managed actions are currently unavailable on Windows because they require
+durable directory synchronization. Ordinary sync remains available there.
+
 ### File Formats
 
 #### facts.md
@@ -657,7 +709,7 @@ bee sync --recent-days 7
 - Conversations and daily summaries are fetched concurrently for faster syncing
 - All timestamps are in ISO 8601 format (UTC)
 - The output directory is created if it doesn't exist
-- Existing files for changed items are overwritten in place; deletes are not reconciled, so a local file for an item later deleted on the server remains until a `--full` re-sync into a fresh directory
+- In ordinary sync, existing files for changed items are overwritten in place; deletes are not reconciled, so a local file for an item later deleted on the server remains until a `--full` re-sync into a fresh directory. Opt-in managed mode provides a separate review and recoverable-quarantine workflow as described above.
 
 ## License
 
