@@ -92,6 +92,27 @@ endpoint, incomplete pagination or malformed insight aborts the complete scan;
 none is treated as an empty insight list. The ordinary sync renderer supplies
 the Markdown bytes and `insights/YYYY-MM-DD/ID.md` path.
 
+## Recorded live-account check
+
+The [sanitized live-run receipt](live-account-verification-2026-10-22.json)
+records a production-account check on October 22, 2026, from 16:06:11 to
+16:06:32 UTC. It identifies implementation commit
+[`5257362`](https://github.com/atikur/bee-cli/commit/52573624c2dfe8e01a51426439a5dbd731df4281)
+and the compiled `dist/bee` binary by SHA-256.
+
+Initial managed export wrote seven files. Repeat sync wrote zero and kept all
+seven unchanged. Reconciliation preview produced zero candidates and preserved
+the export and inventory bytes. The check used one account on macOS through the
+normal production client without a configured proxy. It wrote local exports,
+inventory and a preview plan; no source-account mutation was requested.
+
+The receipt contains aggregate counts, timings and integrity-check results.
+Account identifiers, credentials, recordings, exported content and raw outputs
+remain private. It records local verification rather than independent
+attestation. The account returned no insights, and live apply, quarantine and
+restore were not exercised. The receipt was added afterward; its tested source
+revision remains the implementation commit above.
+
 ## Scope to keep in review
 
 The automated tests and demos use invented data on macOS with Bun 1.4.3.
