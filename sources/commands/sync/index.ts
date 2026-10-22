@@ -6,9 +6,12 @@ import type { Command, CommandContext } from "@/commands/types";
 import { requestClientJson } from "@/client/clientApi";
 import type { Environment } from "@/environment";
 import { loadToken } from "@/secureStore";
+import { parseManagedArgs, runManagedSync } from "./managed/command";
+import { withSyncOutputLock } from "./managed/storage";
+import type { SnapshotFormatters } from "./managed/snapshot";
 
 const USAGE =
-  "bee sync [--output <dir>] [--recent-days N] [--full] [--since <epochMs>] [--only <facts|todos|daily|conversations|insights>]";
+  "bee sync [--output <dir>] [--recent-days N] [--full] [--since <epochMs>] [--only <facts|todos|daily|conversations|insights>] | bee sync [--managed | --reconcile | --apply <plan-id> | --restore <plan-id>] [--output <dir>]";
 
 const DEFAULT_OUTPUT_DIR = "bee-sync";
 const PAGE_SIZE = 100;
@@ -191,8 +194,16 @@ export const syncCommand: Command = {
   description: "Sync developer data to markdown files.",
   usage: USAGE,
   run: async (args, context) => {
+    const managed = parseManagedArgs(args);
+    if (managed) {
+      await runManagedSync(managed, context, managedFormatters);
+      return;
+    }
     const options = parseSyncArgs(args);
-    await syncAll(context, options);
+    await withSyncOutputLock(options.outputDir, async (locked) => {
+      await locked.assertLegacyAllowed();
+      await syncAll(context, options);
+    });
   },
 };
 
@@ -1653,6 +1664,10 @@ async function writeFactsMarkdown(
   outputDir: string,
   facts: Fact[]
 ): Promise<void> {
+  await writeFile(path.join(outputDir, "facts.md"), formatFactsMarkdown(facts), "utf8");
+}
+
+function formatFactsMarkdown(facts: Fact[]): string {
   const confirmed = facts.filter((fact) => fact.confirmed);
   const pending = facts.filter((fact) => !fact.confirmed);
 
@@ -1663,7 +1678,7 @@ async function writeFactsMarkdown(
   lines.push(...formatFactsList(pending));
   lines.push("");
 
-  await writeFile(path.join(outputDir, "facts.md"), lines.join("\n"), "utf8");
+  return lines.join("\n");
 }
 
 function formatFactsList(facts: Fact[]): string[] {
@@ -1681,6 +1696,10 @@ async function writeTodosMarkdown(
   outputDir: string,
   todos: Todo[]
 ): Promise<void> {
+  await writeFile(path.join(outputDir, "todos.md"), formatTodosMarkdown(todos), "utf8");
+}
+
+function formatTodosMarkdown(todos: Todo[]): string {
   const open = todos.filter((todo) => !todo.completed);
   const completed = todos.filter((todo) => todo.completed);
 
@@ -1691,7 +1710,7 @@ async function writeTodosMarkdown(
   lines.push(...formatTodoList(completed));
   lines.push("");
 
-  await writeFile(path.join(outputDir, "todos.md"), lines.join("\n"), "utf8");
+  return lines.join("\n");
 }
 
 function formatTodoList(todos: Todo[]): string[] {
@@ -2084,4 +2103,32 @@ export const __testing = {
   accountFingerprint,
   normalizeSinceCursor,
   CHANGES_OVERLAP_MS,
+};
+
+// Shared byte-for-byte renderers. Managed snapshot validates API shapes before
+// invoking these; injected formatters keep the scanner independent of the CLI.
+const managedFormatters: SnapshotFormatters = {
+  facts: (items) => formatFactsMarkdown(items as Fact[]),
+  todos: (items) => formatTodosMarkdown(items as Todo[]),
+  daily: (item) => {
+    const detail = item as DailySummaryDetail;
+    return {
+      path: `daily/${resolveDailyFolderName(detail)}/summary.md`,
+      content: formatDailySummaryMarkdown(detail),
+    };
+  },
+  conversation: (item) => {
+    const detail = item as ConversationDetail;
+    return {
+      path: `conversations/${resolveConversationFolderName(detail)}/${detail.id}.md`,
+      content: formatConversationMarkdown(detail),
+    };
+  },
+  insight: (item) => {
+    const insight = item as Insight;
+    return {
+      path: `insights/${resolveInsightFolderName(insight)}/${insight.id}.md`,
+      content: formatInsightMarkdown(insight),
+    };
+  },
 };

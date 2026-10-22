@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "kind": "sanitized-live-account-verification",
+  "result": "passed",
+  "startedAtUtc": "2026-10-22T16:06:11.030840+00:00",
+  "finishedAtUtc": "2026-10-22T16:06:32.361503+00:00",
+  "testedArtifact": {
+    "sourceCommit": "52573624c2dfe8e01a51426439a5dbd731df4281",
+    "binary": "dist/bee",
+    "binarySha256": "ce6bb2ab28f6f63ee075875541a7d92437f30df1bf4ea7079a40112508714d6f",
+    "commitVerified": true,
+    "binaryVerified": true,
+    "checkoutClean": true,
+    "sourceAndBinaryUnchangedAfterRun": true
+  },
+  "platform": {
+    "system": "Darwin",
+    "machine": "arm64"
+  },
+  "scope": {
+    "liveBeeProductionAccount": true,
+    "accountCount": 1,
+    "normalProductionClientWithoutConfiguredProxy": true,
+    "actions": ["managed-export", "managed-repeat", "reconcile-preview"],
+    "sourceAccountMutationRequested": false,
+    "applyPerformed": false,
+    "restorePerformed": false,
+    "localWrites": "Private Markdown exports, managed inventory and one reconciliation preview plan.",
+    "countUnit": "Exported files; facts and todos are aggregate files that exist even for empty lists."
+  },
+  "stages": [
+    {
+      "stage": "initial",
+      "status": "passed",
+      "exitCode": 0,
+      "elapsedSeconds": 7.257,
+      "writtenFiles": 7,
+      "unchangedFiles": 0,
+      "conflictCount": 0,
+      "exportedFileCounts": {
+        "conversationFiles": 4,
+        "dailySummaryFiles": 1,
+        "factsAggregateFiles": 1,
+        "todosAggregateFiles": 1,
+        "insightFiles": 0,
+        "totalFiles": 7
+      },
+      "inventoryMatchesExportBytes": true,
+      "privatePermissionsVerified": true,
+      "noPendingRecoveryOrLock": true,
+      "timedOut": false,
+      "outputLimitReached": false
+    },
+    {
+      "stage": "repeat",
+      "status": "passed",
+      "exitCode": 0,
+      "elapsedSeconds": 8.167,
+      "writtenFiles": 0,
+      "unchangedFiles": 7,
+      "conflictCount": 0,
+      "totalExportedFiles": 7,
+      "inventoryMatchesExportBytes": true,
+      "noActiveFilesRemoved": true,
+      "repeatOutputOrMembershipChanged": false,
+      "retainedAbsentFileCount": 0,
+      "stableRepeatEstablished": true,
+      "noPendingRecoveryOrLock": true,
+      "timedOut": false,
+      "outputLimitReached": false
+    },
+    {
+      "stage": "preview",
+      "status": "passed",
+      "exitCode": 0,
+      "elapsedSeconds": 5.804,
+      "candidateCount": 0,
+      "conflictCount": 0,
+      "activeExportBytesPreserved": true,
+      "inventoryBytesPreserved": true,
+      "onlyOnePlanAdded": true,
+      "planBindingAndIntegrityVerified": true,
+      "noApplyOrRestorePerformed": true,
+      "noPendingRecoveryOrLock": true,
+      "timedOut": false,
+      "outputLimitReached": false
+    }
+  ],
+  "limitations": [
+    "This recorded local check covers one account and one macOS filesystem; it does not establish all-account or large-account reliability.",
+    "The account returned no insights. Endpoint completion does not establish live nonempty-insight record-shape coverage.",
+    "No live apply, quarantine, restore, deletion or crash-recovery behavior is established by this run.",
+    "No downstream adoption, family use or learning outcome is established by this run.",
+    "Complete scans are not atomic server snapshots; absence does not prove deletion.",
+    "This receipt records local verification results and artifact-identity checks; it is not an independent attestation of the account responses.",
+    "The receipt was prepared for publication after the run. The live check was performed on the source commit above and was not repeated for this documentation update."
+  ],
+  "privacy": {
+    "accountContentAndRawOutputsPrivate": true,
+    "omitted": [
+      "Account identifiers and credential details",
+      "Recordings, transcripts and exported content",
+      "Per-record identifiers and private-content hashes",
+      "Local filesystem paths and plan identifiers",
+      "Raw command output, authentication internals and earlier-attempt details"
+    ]
+  }
+}

@@ -23,7 +23,10 @@
     "dist/platforms",
     "scripts/postinstall.js",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/managed-sync.md",
+    "docs/managed-sync-review.md",
+    "docs/managed-search-example.md"
   ],
   "scripts": {
     "build": "bun build ./sources/main.ts --compile --outfile ./dist/bee",

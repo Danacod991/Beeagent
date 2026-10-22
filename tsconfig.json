@@ -27,5 +27,5 @@
     "types": ["bun-types"],
     "skipLibCheck": true
   },
-  "include": ["sources/**/*.ts"]
+  "include": ["sources/**/*.ts", "scripts/demo-managed-sync.ts", "scripts/demo-managed-search.ts"]
 }
