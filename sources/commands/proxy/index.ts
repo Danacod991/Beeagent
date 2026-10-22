@@ -4,7 +4,8 @@ import {
   DEFAULT_PROXY_SOCKET_PATH,
   expandHomePath,
 } from "@/utils/proxyAddress";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 
 const USAGE = "bee proxy [--port N] [--idle-timeout SECONDS]\nbee proxy --socket [path] [--idle-timeout SECONDS]";
 const DEFAULT_PORT = 8787;
@@ -133,8 +134,11 @@ export async function startProxy(
   }
 
   const socketPath = options.socketPath ? expandHomePath(options.socketPath) : undefined;
-  if (socketPath && existsSync(socketPath)) {
-    unlinkSync(socketPath);
+  if (socketPath) {
+    mkdirSync(dirname(socketPath), { mode: 0o700, recursive: true });
+    if (existsSync(socketPath)) {
+      unlinkSync(socketPath);
+    }
   }
 
   const idleTimeout = options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS;
