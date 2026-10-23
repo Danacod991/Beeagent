@@ -24,6 +24,7 @@ import { threadsCommand } from "@/commands/threads";
 import { todosCommand } from "@/commands/todos";
 import { todayCommand } from "@/commands/today";
 import { versionCommand } from "@/commands/version";
+import { verifyCommand } from "@/commands/verify";
 import type { Environment } from "@/environment";
 import { createCommandContext } from "@/context";
 
@@ -55,6 +56,7 @@ const commands = [
   todosCommand,
   pingCommand,
   versionCommand,
+  verifyCommand,
 ] satisfies readonly Command[];
 
 const commandIndex = new Map<string, Command>();

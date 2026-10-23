@@ -152,6 +152,29 @@ By default, data commands return markdown. Use `--json` to print raw JSON.
   - `conversations transcript <id>` - Get just the transcript utterances. Use `--since <epochMs>` to return only utterances spoken at or after a given time (epoch milliseconds) — handy for polling a live transcript for just the new utterances. Options: `--since <epochMs>`, `--json`.
   - `conversations related <id>` - Find conversations related to one. Options: `--limit N`, `--json`.
 
+- `verify` - Export and verify locally signed transcript evidence bundles. Requires an Ed25519 PEM key pair.
+  - `verify export <conversation-id> --private-key <private.pem> --out <bundle.json> [--privacy-mode full|hash-only]` - Fetch a Bee conversation and write a signed bundle without overwriting an existing file. `full` includes the conversation response; `hash-only` omits its contents.
+  - `verify check <bundle.json> [--public-key <trusted-public.pem>] [--transcript <transcriptions.json>]` - Check the signature and, for full bundles, transcript hash. For hash-only bundles, optionally provide a JSON array of Bee transcriptions to compare with the signed hash.
+  - `verify status` - Show local proof counts and audit-chain integrity.
+  - `verify audit` - List local proof export and verification events. Use `--ledger <path>` on any subcommand to select a ledger file.
+
+Create an unencrypted Ed25519 PEM key pair with OpenSSL, then keep the private key secure and share the public key separately:
+
+```bash
+openssl genpkey -algorithm Ed25519 -out bee-signing-key.pem
+openssl pkey -in bee-signing-key.pem -pubout -out bee-signing-public.pem
+bee verify export 123 --private-key bee-signing-key.pem --out conversation-123.proof.json
+bee verify check conversation-123.proof.json --public-key bee-signing-public.pem
+bee verify status
+bee verify audit
+```
+
+Full proof bundles contain the complete Bee conversation response in plaintext, so treat those exported files as sensitive. Hash-only bundles disclose the transcript hash and signing metadata without including transcript contents; anyone checking the underlying transcript must provide the Bee transcriptions JSON separately.
+
+The CLI keeps a local hash-chained audit log at `~/.bee/verification-ledger-<environment>.jsonl` (or in `BEE_CONFIG_DIR`). It records proof exports and verification results and checks the chain before adding or displaying entries. This detects changed retained entries when their hashes are not recomputed, but it is a local file—not an immutable or externally witnessed ledger—and cannot establish that its tail was not deleted. The generated time is local and is not a trusted timestamp.
+
+The signature establishes that the signed proof bundle has not changed since it was signed by the corresponding private key. It does not prove Bee authored the data, that the transcript is accurate, or when it was signed. Hash-only mode limits disclosure but is not encryption or a zero-knowledge proof: a recipient may be able to guess predictable transcript text and compare its hash. BEE does not expose raw audio capture/purge attestations, so this CLI does not claim to verify audio deletion or provide a certified legal conclusion. This is a local CLI workflow; it does not use a BeeSync Pro server, external blockchain, or remote audit service.
+
 - `daily` - Access daily summaries of your activity.
   - `daily list` - List daily summaries. Options: `--limit N`, `--cursor <cursor>`, `--json`.
   - `daily get <id>` - Get a specific daily summary. Options: `--json`.
