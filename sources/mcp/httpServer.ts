@@ -1,7 +1,7 @@
 import type { CommandContext } from "@/commands/types";
 import { handleMcpJsonRpc, MAX_MCP_MESSAGE_BYTES } from "@/mcp/server";
 import type { JsonValue } from "@/mcp/types";
-import { timingSafeEqual } from "node:crypto";
+import { isAddressInUseError, isBearerAuthorized, isLocalRequest } from "@/utils/localHttp";
 
 const DEFAULT_HTTP_PORT = 8790;
 const MAX_PORT_ATTEMPTS = 50;
@@ -149,7 +149,7 @@ async function handleHttpRequest(
     });
   }
 
-  if (!isAuthorized(request, token)) {
+  if (!isBearerAuthorized(request, token)) {
     return new Response("Unauthorized", {
       status: 401,
       headers: {
@@ -213,63 +213,6 @@ async function handleHttpRequest(
   return jsonResponse(result);
 }
 
-function isAuthorized(request: Request, token: string): boolean {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader) {
-    const [scheme, ...parts] = authHeader.split(" ");
-    const bearer = parts.join(" ").trim();
-    if (scheme?.toLowerCase() === "bearer" && secureEqual(bearer, token)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-const ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
-
-function isAllowedHost(host: string | null): boolean {
-  if (host === null) {
-    return false;
-  }
-  const withoutPort = stripPort(host);
-  return ALLOWED_HOSTS.has(withoutPort.toLowerCase());
-}
-
-function stripPort(host: string): string {
-  if (host.startsWith("[")) {
-    const end = host.indexOf("]");
-    return end === -1 ? host : host.slice(0, end + 1);
-  }
-  const colon = host.indexOf(":");
-  return colon === -1 ? host : host.slice(0, colon);
-}
-
-function isLocalRequest(request: Request): boolean {
-  if (!isAllowedHost(request.headers.get("host"))) {
-    return false;
-  }
-
-  const origin = request.headers.get("origin");
-  if (origin === null) {
-    return true;
-  }
-
-  let originHost: string;
-  try {
-    originHost = new URL(origin).host;
-  } catch {
-    return false;
-  }
-  return isAllowedHost(originHost);
-}
-
-function secureEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left);
-  const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
-}
-
 function jsonResponse(value: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,
@@ -284,15 +227,4 @@ function validateToken(token: string): void {
   if (token.length < 32) {
     throw new Error("BEE_MCP_HTTP_TOKEN must be at least 32 characters.");
   }
-}
-
-function isAddressInUseError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const message = error.message.toLowerCase();
-  return message.includes("eaddrinuse") ||
-    (message.includes("failed to start server") &&
-      message.includes("port") &&
-      message.includes("use"));
 }

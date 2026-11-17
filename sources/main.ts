@@ -24,6 +24,7 @@ import { threadsCommand } from "@/commands/threads";
 import { todosCommand } from "@/commands/todos";
 import { todayCommand } from "@/commands/today";
 import { versionCommand } from "@/commands/version";
+import { voiceCommand } from "@/commands/voice";
 import type { Environment } from "@/environment";
 import { createCommandContext } from "@/context";
 
@@ -52,6 +53,7 @@ const commands = [
   syncCommand,
   proxyCommand,
   threadsCommand,
+  voiceCommand,
   todosCommand,
   pingCommand,
   versionCommand,
