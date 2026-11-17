@@ -190,9 +190,25 @@ By default, data commands return markdown. Use `--json` to print raw JSON.
 
   Each send carries a `client_message_id`, generated unless you pass `--client-message-id`. It is printed with every result and in any error after which the message may have been stored. Retries reuse it, so a message is never sent twice. Re-running the same command with `--client-message-id <id>` resumes that message instead of sending a new one. That also covers a send Bee did not confirm in time, shown with `message_id: (not confirmed)`. Re-running `create` with the same id returns the same thread. Photos and files are uploaded before the message is sent; if any upload fails, nothing is sent. Attaching them requires the Bee agent consent in the Bee app.
 
-- `voice` - Talk with the Bee agent by voice in your browser (Bee test users only). Starts a page on `127.0.0.1` and prints its link; tap the microphone (or press Space), speak, and Bee's answer is shown and read aloud. Options: `--thread <thread-id>` (continue an existing thread instead of starting a new one), `--lang <tag>` (speech language such as `en-US` or `de-DE`; defaults to the browser's language), `--port N`, `--no-open` (print the link without opening a browser).
+- `voice` - Talk with the Bee agent by voice in your browser (Bee test users only). Starts a page on `127.0.0.1` and prints its link; tap the microphone (or press Space), speak, and Bee's answer is shown and read aloud. Options: `--thread <thread-id>` (continue an existing thread instead of starting a new one), `--lang <tag>` (speech language such as `en-US` or `de-DE`; defaults to the browser's language), `--port N`, `--no-open` (print the link without opening a browser), `--host <address>`, `--password <value>`, `--tls-cert <path>` / `--tls-key <path>`.
 
   The browser does the listening and speaking, so no extra API keys or audio tools are needed. Voice input works in Chrome, Edge and Safari; in other browsers you can type and still hear the replies. **Hands-free** keeps listening after each reply, and tapping the button while Bee is thinking or speaking stops it. The conversation is a normal thread, so it also shows up in `bee threads list`.
+
+  **Reaching it from your phone or another device.** `--host <address>` listens beyond this computer; a password is then always required, generated and shown with a QR code if you do not pass one. Browsers only allow the microphone over https, so plain http works for typing but not for speaking away from localhost. Two ways to get https:
+
+  ```bash
+  bee voice --host 0.0.0.0 --tls-cert ./cert.pem --tls-key ./key.pem
+  ```
+
+  ```bash
+  bee voice --password "$(openssl rand -base64 12)"   # then point a tunnel at it
+  cloudflared tunnel --url http://127.0.0.1:8795       # or: tailscale serve / ngrok
+  ```
+
+  Setting `--password` (or `BEE_VOICE_PASSWORD`, at least 8 characters) also turns off the localhost-only check, so a tunnel or reverse proxy can forward to it. Wrong passwords are limited to 10 per 10 minutes.
+
+  > [!WARNING]
+  > The server answers as your Bee account. Anyone who reaches the address and knows the password can read your Bee data, so keep the password strong and stop the command when you are done.
 
   > [!NOTE]
   > Speech recognition is the browser's own: Chrome, Edge and Safari may send your microphone audio to their vendor's speech service to transcribe it. Only the resulting text goes to Bee. The page's link carries a one-time session token and works on your computer only, until you stop `bee voice`.

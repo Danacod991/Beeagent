@@ -149,6 +149,22 @@
   .toggles label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .toggles input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
 
+  #gate {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    z-index: 10;
+  }
+  #gate form { flex-direction: column; max-width: 320px; text-align: center; }
+  #gate h2 { margin: 0 0 4px; font-size: 20px; }
+  #gate p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+  #gate input { text-align: center; }
+  #gate button { background: var(--accent); color: var(--accent-ink); border-color: transparent; padding: 10px; }
+  #gate .error { color: var(--danger); font-size: 14px; min-height: 1.4em; }
+
   form { display: flex; gap: 8px; width: 100%; }
   #text {
     flex: 1;
@@ -163,6 +179,16 @@
 </style>
 </head>
 <body data-state="idle">
+<div id="gate" hidden>
+  <form id="gate-form">
+    <h2>Bee Voice</h2>
+    <p>Enter the password shown by <code>bee voice</code>.</p>
+    <input id="gate-password" type="password" autocomplete="current-password" aria-label="Password" required>
+    <button class="quiet" type="submit">Unlock</button>
+    <p class="error" id="gate-error" role="alert"></p>
+  </form>
+</div>
+
 <main>
   <header>
     <h1>Bee <span>Voice</span></h1>
@@ -261,7 +287,11 @@
 
   // ---- server ----------------------------------------------------------------
   class ApiError extends Error {
-    constructor(message, retryable) { super(message); this.retryable = retryable; }
+    constructor(message, retryable, needsLogin) {
+      super(message);
+      this.retryable = retryable;
+      this.needsLogin = needsLogin === true;
+    }
   }
 
   async function api(path, body) {
@@ -278,7 +308,10 @@
     let data = {};
     try { data = await response.json(); } catch { /* non-JSON error body */ }
     if (!response.ok) {
-      throw new ApiError(data.error || "Request failed (" + response.status + ").", data.retryable === true);
+      throw new ApiError(
+        data.error || "Request failed (" + response.status + ").",
+        data.retryable === true,
+        data.login === true);
     }
     return data;
   }
@@ -576,22 +609,58 @@
     $("handsfree-label").hidden = true;
     addMessage("note", "This browser cannot recognize speech, so type your message below. For voice input, open this page in Chrome, Edge or Safari.");
   }
+  if (Recognition && !window.isSecureContext) {
+    // getUserMedia, and so speech recognition, needs https away from localhost.
+    addMessage("note", "This page is not served over https, so the browser will not allow the microphone. Type your message below, or reach this page over https.");
+  }
   if (!synth) $("speak-label").hidden = true;
   else synth.getVoices(); // voices load asynchronously; ask early
   setState("idle");
 
-  if (!token) {
-    addError("This link has no session token. Open the full link printed by `bee voice`.");
-  } else {
-    api("/api/session").then((session) => {
+  const gate = $("gate"), gateForm = $("gate-form"), gatePassword = $("gate-password"), gateError = $("gate-error");
+
+  function showGate(message) {
+    gateError.textContent = message || "";
+    gate.hidden = false;
+    gatePassword.focus();
+  }
+
+  gateForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const password = gatePassword.value;
+    if (!password) return;
+    gateError.textContent = "Checking…";
+    try {
+      const data = await api("/api/login", { password });
+      token = data.token;
+      try { sessionStorage.setItem("bee-voice-token", token); } catch { /* storage blocked */ }
+      gatePassword.value = "";
+      gate.hidden = true;
+      await start();
+    } catch (error) {
+      gateError.textContent = error.message;
+      gatePassword.select();
+    }
+  });
+
+  async function start() {
+    try {
+      const session = await api("/api/session");
       if (session.thread_id) {
         threadId = session.thread_id;
         addMessage("note", "Continuing your existing thread.");
       }
       if (session.lang) lang = session.lang;
       document.documentElement.lang = lang;
-    }).catch((error) => addError(error.message));
+    } catch (error) {
+      // A password-protected server answers 401 with `login` until the page
+      // has traded the password for a token.
+      if (error.needsLogin) showGate(token ? "This session has expired. Enter the password again." : "");
+      else addError(error.message);
+    }
   }
+
+  start();
 })();
 </script>
 </body>

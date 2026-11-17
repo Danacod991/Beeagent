@@ -172,12 +172,13 @@ describe("voice server over HTTP", () => {
 
 describe("parseVoiceArgs", () => {
   it("defaults to a new thread and opening the browser", () => {
-    expect(parseVoiceArgs([])).toEqual({ threadId: null, lang: null, open: true });
+    expect(parseVoiceArgs([])).toEqual(
+      { threadId: null, lang: null, open: true, host: null, password: null, tlsCert: null, tlsKey: null });
   });
 
   it("parses every flag", () => {
     expect(parseVoiceArgs(["--thread", "t1", "--lang", "de-DE", "--port", "9000", "--no-open"]))
-      .toEqual({ threadId: "t1", lang: "de-DE", port: 9000, open: false });
+      .toEqual({ threadId: "t1", lang: "de-DE", port: 9000, open: false, host: null, password: null, tlsCert: null, tlsKey: null });
   });
 
   it("rejects bad values", () => {
@@ -185,5 +186,89 @@ describe("parseVoiceArgs", () => {
     expect(() => parseVoiceArgs(["--port"])).toThrow("requires a value");
     expect(() => parseVoiceArgs(["--lang", "not a tag"])).toThrow("--lang");
     expect(() => parseVoiceArgs(["extra"])).toThrow("Unexpected argument");
+  });
+});
+
+const SHARED: VoiceServerOptions = { ...OPTIONS, password: "hunter2hunter2", host: "0.0.0.0" };
+
+describe("voice server with a password", () => {
+  it("serves the page to a request from another host", async () => {
+    const { context } = fakeContext(() => Response.json(completed));
+    const response = await handleVoiceRequest(
+      request("/", { token: null, headers: { host: "phone.local:8795" } }), context, SHARED);
+    expect(response.status).toBe(200);
+    await response.text();
+  });
+
+  it("trades the right password for the session token", async () => {
+    const { context } = fakeContext(() => Response.json(completed));
+    const response = await handleVoiceRequest(
+      request("/api/login", { token: null, body: { password: "hunter2hunter2" } }), context, SHARED);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ token: TOKEN });
+  });
+
+  it("refuses a wrong password and rate-limits guessing", async () => {
+    const { context, calls } = fakeContext(() => Response.json(completed));
+    // A fresh options object so this test gets its own failure counter.
+    const options: VoiceServerOptions = { ...SHARED };
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const response = await handleVoiceRequest(
+        request("/api/login", { token: null, body: { password: "wrong-password" } }), context, options);
+      expect(response.status).toBe(401);
+      expect((await response.json() as { login: boolean }).login).toBe(true);
+    }
+    const limited = await handleVoiceRequest(
+      request("/api/login", { token: null, body: { password: "wrong-password" } }), context, options);
+    expect(limited.status).toBe(429);
+    // Even the correct password waits out the window.
+    const correct = await handleVoiceRequest(
+      request("/api/login", { token: null, body: { password: "hunter2hunter2" } }), context, options);
+    expect(correct.status).toBe(429);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("tells an unauthenticated API caller to log in", async () => {
+    const { context } = fakeContext(() => Response.json(completed));
+    const response = await handleVoiceRequest(request("/api/session", { token: null }), context, SHARED);
+    expect(response.status).toBe(401);
+    expect((await response.json() as { login: boolean }).login).toBe(true);
+  });
+
+  it("still requires the token for the API", async () => {
+    const { context, calls } = fakeContext(() => Response.json(completed));
+    const response = await handleVoiceRequest(
+      request("/api/message", { token: "wrong", body: { text: "hi", client_message_id: "c1" } }), context, SHARED);
+    expect(response.status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("has no login route when no password is set", async () => {
+    const { context } = fakeContext(() => Response.json(completed));
+    const response = await handleVoiceRequest(
+      request("/api/login", { token: null, body: { password: "hunter2hunter2" } }), context, OPTIONS);
+    expect(response.status).toBe(401);
+    expect((await response.json() as { login?: boolean }).login).toBeUndefined();
+  });
+});
+
+describe("parseVoiceArgs for shared access", () => {
+  it("parses the host, password and certificate flags", () => {
+    const options = parseVoiceArgs(["--host", "0.0.0.0", "--password", "hunter2hunter2"]);
+    expect(options.host).toBe("0.0.0.0");
+    expect(options.password).toBe("hunter2hunter2");
+  });
+
+  it("takes the password from the environment", () => {
+    expect(parseVoiceArgs([], "hunter2hunter2").password).toBe("hunter2hunter2");
+    expect(parseVoiceArgs(["--password", "flagflagflag"], "hunter2hunter2").password).toBe("flagflagflag");
+    expect(parseVoiceArgs([], "").password).toBeNull();
+  });
+
+  it("rejects a short password and a half-given certificate", () => {
+    expect(() => parseVoiceArgs(["--password", "short"])).toThrow("at least 8 characters");
+    expect(() => parseVoiceArgs([], "short")).toThrow("at least 8 characters");
+    expect(() => parseVoiceArgs(["--tls-cert", "/tmp/cert.pem"])).toThrow("must be given together");
+    expect(() => parseVoiceArgs(["--tls-cert", "/nope.pem", "--tls-key", "/nope.pem"])).toThrow("No such file");
   });
 });

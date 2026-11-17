@@ -10,7 +10,7 @@ import {
   waitForAnswer,
   type ThreadAnswer,
 } from "@/resources/threads/api";
-import { isAddressInUseError, isBearerAuthorized, isLocalRequest } from "@/utils/localHttp";
+import { isAddressInUseError, isBearerAuthorized, isLocalRequest, secureEqual } from "@/utils/localHttp";
 import pageHtml from "./page.html" with { type: "text" };
 
 // The text import embeds the file as a string; bun-types describes every
@@ -29,8 +29,23 @@ const CLIENT_MESSAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 // idle timeout or a browser's patience.
 const DEFAULT_WAIT_MS = 50_000;
 
+// Wrong passwords allowed per window, across all clients, before /api/login
+// answers 429. With the minimum password length this makes guessing hopeless.
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+
 export type VoiceServerOptions = {
+  // Bearer token every /api call must present.
   token: string;
+  // Set when the page is reachable from other devices: the page asks for this
+  // password and /api/login trades it for the token. Without it the server
+  // only answers requests addressed to this machine, and the token reaches
+  // the page in the link's fragment.
+  password?: string;
+  // Address to listen on; defaults to 127.0.0.1.
+  host?: string;
+  // Serve HTTPS with this certificate instead of plain HTTP.
+  tls?: { certPath: string; keyPath: string };
   port?: number;
   // Thread the page starts on; null starts a new thread with the first message.
   threadId: string | null;
@@ -56,9 +71,10 @@ const PAGE_HEADERS = {
 export function startVoiceServer(context: CommandContext, options: VoiceServerOptions): VoiceServer {
   const fetch = async (request: Request): Promise<Response> =>
     await handleVoiceRequest(request, context, options);
+  const tryStart = (port: number): ReturnType<typeof Bun.serve> | null => tryServe(port, options, fetch);
 
   if (options.port !== undefined) {
-    const server = tryStart(options.port, fetch);
+    const server = tryStart(options.port);
     if (!server) {
       throw new Error(`Port ${options.port} is in use. Choose another with --port.`);
     }
@@ -66,7 +82,7 @@ export function startVoiceServer(context: CommandContext, options: VoiceServerOp
   }
   for (let offset = 0; offset <= MAX_PORT_ATTEMPTS; offset += 1) {
     const port = DEFAULT_VOICE_PORT + offset;
-    const server = tryStart(port, fetch);
+    const server = tryStart(port);
     if (server) {
       return { server, port };
     }
@@ -74,14 +90,18 @@ export function startVoiceServer(context: CommandContext, options: VoiceServerOp
   throw new Error("No free port found. Specify one with --port.");
 }
 
-function tryStart(
+function tryServe(
   port: number,
+  options: VoiceServerOptions,
   fetch: (request: Request) => Promise<Response>
 ): ReturnType<typeof Bun.serve> | null {
   try {
     return Bun.serve({
-      hostname: "127.0.0.1",
+      hostname: options.host ?? "127.0.0.1",
       port,
+      ...(options.tls
+        ? { tls: { cert: Bun.file(options.tls.certPath), key: Bun.file(options.tls.keyPath) } }
+        : {}),
       idleTimeout: IDLE_TIMEOUT_SECONDS,
       maxRequestBodySize: MAX_BODY_BYTES,
       fetch,
@@ -99,14 +119,19 @@ export async function handleVoiceRequest(
   context: CommandContext,
   options: VoiceServerOptions
 ): Promise<Response> {
-  if (!isLocalRequest(request)) {
+  // Link mode trusts only requests addressed to this machine. Password mode is
+  // meant to be reached from elsewhere, often through a reverse proxy that
+  // rewrites Host, so there the bearer token alone decides; it is a header the
+  // page sets itself, which another website cannot make a browser send.
+  const password = options.password;
+  if (password === undefined && !isLocalRequest(request)) {
     return new Response("Forbidden", { status: 403, headers: { "cache-control": "no-store" } });
   }
 
   const { pathname } = new URL(request.url);
 
-  // The page holds no secrets: the session token travels in the URL fragment,
-  // which the browser never sends, and every /api call must present it.
+  // The page holds no secrets: every /api call must present the token, which
+  // the page gets from the link's fragment or from /api/login.
   if (pathname === "/") {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return methodNotAllowed("GET");
@@ -117,8 +142,16 @@ export async function handleVoiceRequest(
   if (!pathname.startsWith("/api/")) {
     return new Response("Not Found", { status: 404 });
   }
+  if (pathname === "/api/login" && password !== undefined) {
+    if (request.method !== "POST") {
+      return methodNotAllowed("POST");
+    }
+    return await login(request, options, password);
+  }
   if (!isBearerAuthorized(request, options.token)) {
-    return json({ error: "This page's session is not valid. Open the link printed by `bee voice` again." }, 401);
+    return password === undefined
+      ? json({ error: "This page's session is not valid. Open the link printed by `bee voice` again." }, 401)
+      : json({ error: "Enter the password to continue.", login: true }, 401);
   }
 
   if (pathname === "/api/session") {
@@ -136,14 +169,8 @@ export async function handleVoiceRequest(
     return methodNotAllowed("POST");
   }
 
-  let body: Body;
-  try {
-    const parsed = JSON.parse(await request.text()) as unknown;
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("not an object");
-    }
-    body = parsed as Body;
-  } catch {
+  const body = await readBody(request);
+  if (body === null) {
     return json({ error: "The request body must be a JSON object." }, 400);
   }
 
@@ -155,6 +182,37 @@ export async function handleVoiceRequest(
 }
 
 type Body = { readonly [key: string]: unknown };
+
+async function readBody(request: Request): Promise<Body | null> {
+  try {
+    const parsed = JSON.parse(await request.text()) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Body;
+  } catch {
+    return null;
+  }
+}
+
+// Times of recent wrong passwords, per running server.
+const loginFailures = new WeakMap<VoiceServerOptions, number[]>();
+
+async function login(request: Request, options: VoiceServerOptions, password: string): Promise<Response> {
+  const now = Date.now();
+  const failures = (loginFailures.get(options) ?? []).filter((at) => now - at < LOGIN_WINDOW_MS);
+  loginFailures.set(options, failures);
+  if (failures.length >= LOGIN_MAX_FAILURES) {
+    return json({ error: "Too many wrong passwords. Try again in a few minutes.", login: true }, 429);
+  }
+  const body = await readBody(request);
+  const given = body?.["password"];
+  if (typeof given !== "string" || !secureEqual(given, password)) {
+    failures.push(now);
+    return json({ error: "Wrong password.", login: true }, 401);
+  }
+  return json({ token: options.token });
+}
 type Handler = (context: CommandContext, body: Body, waitMs: number) => Promise<Response>;
 
 class BadRequest extends Error {}
