@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bee Voice</title>
+<style>
+  :root {
+    --bg: #faf7ef;
+    --surface: #ffffff;
+    --ink: #1c1a14;
+    --muted: #6f6a5c;
+    --line: #e7e1d0;
+    --accent: #f5b800;
+    --accent-ink: #1c1a14;
+    --user: #1c1a14;
+    --user-ink: #faf7ef;
+    --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14130f;
+      --surface: #1f1d17;
+      --ink: #f3efe3;
+      --muted: #a39d8b;
+      --line: #322f25;
+      --user: #f5b800;
+      --user-ink: #1c1a14;
+      --danger: #ffb4ab;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  main {
+    width: 100%;
+    max-width: 680px;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: 0 16px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 0 12px;
+  }
+  h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  button, input { font: inherit; color: inherit; }
+  .quiet {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .quiet:hover { border-color: var(--muted); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px 0 16px;
+  }
+  .empty {
+    margin: auto;
+    text-align: center;
+    color: var(--muted);
+    max-width: 34ch;
+    text-wrap: balance;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .msg.user { align-self: flex-end; background: var(--user); color: var(--user-ink); border-bottom-right-radius: 4px; }
+  .msg.agent { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.interim { opacity: 0.55; }
+  .msg.note { align-self: center; max-width: 100%; background: none; color: var(--muted); font-size: 14px; text-align: center; padding: 2px 8px; }
+  .msg.error { color: var(--danger); }
+  .msg.note button { margin-left: 8px; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 14px 0 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  #status { margin: 0; min-height: 1.5em; color: var(--muted); font-size: 14px; }
+  #mic {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-ink);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    position: relative;
+    transition: transform 120ms ease;
+  }
+  #mic:active { transform: scale(0.96); }
+  #mic svg { width: 34px; height: 34px; }
+  #mic::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    opacity: 0;
+  }
+  body[data-state="listening"] #mic::after { animation: pulse 1.4s ease-out infinite; }
+  body[data-state="thinking"] #mic,
+  body[data-state="speaking"] #mic { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 2px var(--line); }
+  body[data-state="thinking"] #mic::after { opacity: 1; border-color: transparent; border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+  @keyframes pulse { from { opacity: 0.9; transform: scale(0.92); } to { opacity: 0; transform: scale(1.25); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    body[data-state="listening"] #mic::after { animation: none; opacity: 1; }
+    body[data-state="thinking"] #mic::after { animation-duration: 3s; }
+  }
+  #mic .icon { display: none; }
+  body[data-state="idle"] #mic .icon-mic,
+  body[data-state="listening"] #mic .icon-mic,
+  body[data-state="thinking"] #mic .icon-stop,
+  body[data-state="speaking"] #mic .icon-stop { display: block; }
+
+  .toggles { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; font-size: 14px; color: var(--muted); }
+  .toggles label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .toggles input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+
+  form { display: flex; gap: 8px; width: 100%; }
+  #text {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 10px 16px;
+  }
+  #text::placeholder { color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body data-state="idle">
+<main>
+  <header>
+    <h1>Bee <span>Voice</span></h1>
+    <button class="quiet" id="new" type="button">New conversation</button>
+  </header>
+
+  <div id="log" aria-live="polite">
+    <p class="empty" id="empty">Tap the microphone and ask Bee about your day, your conversations, or what you need to do next.</p>
+  </div>
+
+  <footer>
+    <p id="status" role="status"></p>
+    <button id="mic" type="button" aria-label="Start listening">
+      <svg class="icon icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      <svg class="icon icon-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+    </button>
+    <div class="toggles">
+      <label id="handsfree-label"><input type="checkbox" id="handsfree"> Hands-free (keep listening after each reply)</label>
+      <label id="speak-label"><input type="checkbox" id="speak" checked> Speak replies</label>
+    </div>
+    <form id="form">
+      <input id="text" type="text" autocomplete="off" placeholder="Or type a message" aria-label="Message">
+      <button class="quiet" type="submit">Send</button>
+    </form>
+  </footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const log = $("log"), statusEl = $("status"), mic = $("mic"), form = $("form"), textInput = $("text");
+  const handsfree = $("handsfree"), speakToggle = $("speak");
+
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const synth = window.speechSynthesis;
+
+  // ---- session ---------------------------------------------------------------
+  // The token arrives in the URL fragment and is kept for reloads of this tab.
+  let token = new URLSearchParams(location.hash.slice(1)).get("token");
+  try {
+    if (token) sessionStorage.setItem("bee-voice-token", token);
+    else token = sessionStorage.getItem("bee-voice-token");
+  } catch { /* storage blocked: the fragment is enough */ }
+
+  let threadId = null;
+  let lang = navigator.language || "en-US";
+  let state = "idle";       // idle | listening | thinking | speaking
+  let turn = 0;             // bumped to cancel whatever the current turn is doing
+  let recognition = null;
+  let silentRounds = 0;
+
+  const STATUS = {
+    idle: Recognition ? "Tap the microphone or press Space to talk" : "",
+    listening: "Listening…",
+    thinking: "Bee is thinking…",
+    speaking: "Speaking — tap to stop",
+  };
+  const MIC_LABEL = {
+    idle: "Start listening",
+    listening: "Stop listening",
+    thinking: "Stop Bee's answer",
+    speaking: "Stop speaking",
+  };
+
+  function setState(next, statusText) {
+    state = next;
+    document.body.dataset.state = next;
+    statusEl.textContent = statusText ?? STATUS[next];
+    mic.setAttribute("aria-label", MIC_LABEL[next]);
+  }
+
+  // ---- transcript ------------------------------------------------------------
+  function addMessage(kind, text) {
+    $("empty")?.remove();
+    const el = document.createElement("div");
+    el.className = "msg " + kind;
+    el.textContent = text;
+    log.append(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  function addError(text, retry) {
+    const el = addMessage("note error", text);
+    if (retry) {
+      const button = document.createElement("button");
+      button.className = "quiet";
+      button.type = "button";
+      button.textContent = "Try again";
+      button.onclick = () => { el.remove(); retry(); };
+      el.append(button);
+    }
+  }
+
+  // ---- server ----------------------------------------------------------------
+  class ApiError extends Error {
+    constructor(message, retryable) { super(message); this.retryable = retryable; }
+  }
+
+  async function api(path, body) {
+    let response;
+    try {
+      response = await fetch(path, {
+        method: body === undefined ? "GET" : "POST",
+        headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch {
+      throw new ApiError("Could not reach `bee voice`. Is it still running in your terminal?", true);
+    }
+    let data = {};
+    try { data = await response.json(); } catch { /* non-JSON error body */ }
+    if (!response.ok) {
+      throw new ApiError(data.error || "Request failed (" + response.status + ").", data.retryable === true);
+    }
+    return data;
+  }
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Runs one request, retrying the failures that are safe to retry. A re-sent
+  // message carries the same client_message_id, so Bee never stores it twice.
+  async function attempt(run, mine) {
+    for (let tries = 0; ; tries += 1) {
+      try {
+        return await run();
+      } catch (error) {
+        if (!(error instanceof ApiError) || !error.retryable || tries >= 2 || mine !== turn) throw error;
+        await sleep(800 * (tries + 1));
+      }
+    }
+  }
+
+  // Sends what the user said and follows the answer until Bee completes it.
+  async function ask(text, clientMessageId) {
+    const mine = ++turn;
+    stopListening();
+    stopSpeaking();
+    setState("thinking");
+
+    const send = () => attempt(() => api("/api/message", {
+      text, thread_id: threadId, client_message_id: clientMessageId,
+    }), mine);
+
+    try {
+      let answer = await send();
+      while (mine === turn) {
+        if (answer.thread_id) threadId = answer.thread_id;
+        if (answer.status === "completed") break;
+        if (answer.status === "stalled") {
+          addMessage("note", "Bee has not reported progress for a while. Ask again, or start a new conversation.");
+          setState("idle");
+          return;
+        }
+        // Pending. Without a message id Bee has not confirmed the send yet, and
+        // sending again with the same id resumes it.
+        if (!answer.message_id || !answer.thread_id) {
+          answer = await send();
+        } else {
+          const after = answer.message_id;
+          answer = await attempt(() => api("/api/wait", { thread_id: threadId, after }), mine);
+        }
+      }
+      if (mine !== turn) return;
+      const reply = (answer.text || "").trim();
+      if (!reply) {
+        addMessage("note", "Bee finished without a text answer.");
+        finishTurn();
+        return;
+      }
+      addMessage("agent", reply);
+      speak(reply, mine);
+    } catch (error) {
+      if (mine !== turn) return;
+      setState("idle");
+      addError(error instanceof Error ? error.message : "Something went wrong.", () => ask(text, clientMessageId));
+    }
+  }
+
+  function submit(text) {
+    const clean = text.trim();
+    if (!clean) return;
+    addMessage("user", clean);
+    ask(clean, crypto.randomUUID());
+  }
+
+  function finishTurn() {
+    if (handsfree.checked && Recognition) listen();
+    else setState("idle");
+  }
+
+  function stopThinking() {
+    turn += 1;
+    setState("idle");
+    addMessage("note", "Stopped.");
+    if (threadId) api("/api/abort", { thread_id: threadId }).catch(() => {});
+  }
+
+  // ---- speech out ------------------------------------------------------------
+  // Reads the answer as prose: markdown markers and raw links are not spoken.
+  function speakable(text) {
+    return text
+      .replace(/```[\s\S]*?```/g, " (code omitted) ")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/https?:\/\/\S+/g, "link")
+      .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
+      .replace(/[*_~`]+/g, "")
+      .replace(/^\s*\|?[-:| ]{3,}\|?\s*$/gm, "")
+      .replace(/\|/g, ", ");
+  }
+
+  // Short utterances: some browsers cut one long utterance off mid-answer.
+  function chunks(text) {
+    const out = [];
+    for (const line of text.split(/\n+/)) {
+      for (const sentence of line.match(/[^.!?。！？]+[.!?。！？]*\s*/g) || []) {
+        let rest = sentence.trim();
+        while (rest.length > 220) {
+          let cut = rest.lastIndexOf(" ", 220);
+          if (cut < 80) cut = 220;
+          out.push(rest.slice(0, cut));
+          rest = rest.slice(cut).trim();
+        }
+        if (rest) out.push(rest);
+      }
+    }
+    return out;
+  }
+
+  function pickVoice() {
+    const voices = synth.getVoices();
+    const exact = voices.filter((v) => v.lang.replace("_", "-").toLowerCase() === lang.toLowerCase());
+    const base = lang.split("-")[0].toLowerCase();
+    const loose = voices.filter((v) => v.lang.toLowerCase().startsWith(base));
+    const pool = exact.length ? exact : loose;
+    return pool.find((v) => v.default) || pool.find((v) => v.localService) || pool[0] || null;
+  }
+
+  let speechWatch = null;
+
+  function speak(text, mine) {
+    const parts = synth && speakToggle.checked ? chunks(speakable(text)) : [];
+    if (parts.length === 0) { finishTurn(); return; }
+
+    setState("speaking");
+    synth.cancel();
+    const voice = pickVoice();
+    let left = parts.length;
+    const done = () => {
+      left -= 1;
+      if (left > 0 || mine !== turn || state !== "speaking") return;
+      clearInterval(speechWatch);
+      finishTurn();
+    };
+    for (const part of parts) {
+      const utterance = new SpeechSynthesisUtterance(part);
+      utterance.lang = voice ? voice.lang : lang;
+      if (voice) utterance.voice = voice;
+      utterance.onend = done;
+      utterance.onerror = done;
+      synth.speak(utterance);
+    }
+    // Some engines drop the last `end` event; notice when the queue is empty.
+    clearInterval(speechWatch);
+    speechWatch = setInterval(() => {
+      if (mine !== turn || state !== "speaking") { clearInterval(speechWatch); return; }
+      if (!synth.speaking && !synth.pending) { left = 1; done(); }
+    }, 700);
+  }
+
+  function stopSpeaking() {
+    clearInterval(speechWatch);
+    if (synth) synth.cancel();
+  }
+
+  // ---- speech in -------------------------------------------------------------
+  const MIC_ERRORS = {
+    "not-allowed": "Microphone access is blocked. Allow it for this page in your browser's site settings, then tap the microphone again.",
+    "service-not-allowed": "Speech recognition is turned off in this browser. You can still type your message.",
+    "audio-capture": "No microphone was found.",
+    "network": "The browser's speech recognition service could not be reached. You can still type your message.",
+    "language-not-supported": "This browser cannot recognize speech in that language. Restart with `bee voice --lang <tag>`.",
+  };
+
+  function listen() {
+    if (!Recognition) return;
+    stopSpeaking();
+    stopListening();
+    const mine = ++turn;
+    const rec = new Recognition();
+    recognition = rec;
+    rec.lang = lang;
+    rec.interimResults = true;
+    rec.continuous = false;
+
+    let finalText = "";
+    let bubble = null;
+    let failed = false;
+
+    rec.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        if (result.isFinal) finalText += result[0].transcript;
+        else interim += result[0].transcript;
+      }
+      const shown = (finalText + interim).trim();
+      if (!shown) return;
+      bubble ??= addMessage("user interim", "");
+      bubble.textContent = shown;
+      log.scrollTop = log.scrollHeight;
+    };
+    rec.onerror = (event) => {
+      // "no-speech" and "aborted" are ordinary ways for a turn to end.
+      if (event.error === "no-speech" || event.error === "aborted") return;
+      failed = true;
+      if (mine === turn) addError(MIC_ERRORS[event.error] || "Speech recognition failed (" + event.error + ").");
+    };
+    rec.onend = () => {
+      if (recognition === rec) recognition = null;
+      const heard = finalText.trim() || (bubble ? bubble.textContent.trim() : "");
+      if (mine !== turn) { bubble?.remove(); return; }
+      if (heard && !failed) {
+        silentRounds = 0;
+        bubble.classList.remove("interim");
+        bubble.textContent = heard;
+        ask(heard, crypto.randomUUID());
+        return;
+      }
+      bubble?.remove();
+      // Hands-free keeps the microphone open through a few silent rounds, then
+      // rests so it is not listening to an empty room forever.
+      silentRounds += 1;
+      if (!failed && handsfree.checked && silentRounds < 3) listen();
+      else { silentRounds = 0; setState("idle"); }
+    };
+
+    try {
+      rec.start();
+      setState("listening");
+    } catch {
+      recognition = null;
+      setState("idle");
+    }
+  }
+
+  function stopListening() {
+    const rec = recognition;
+    recognition = null;
+    if (rec) { try { rec.abort(); } catch { /* already stopped */ } }
+  }
+
+  // ---- controls --------------------------------------------------------------
+  function micPressed() {
+    if (state === "thinking") { stopThinking(); return; }
+    if (state === "speaking") {
+      turn += 1;
+      stopSpeaking();
+      if (Recognition) listen(); else setState("idle");
+      return;
+    }
+    if (state === "listening") {
+      // Finish the turn with what was heard so far.
+      silentRounds = 3;
+      try { recognition?.stop(); } catch { setState("idle"); }
+      return;
+    }
+    if (Recognition) { silentRounds = 0; listen(); }
+    else textInput.focus();
+  }
+
+  mic.addEventListener("click", micPressed);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.code !== "Space" || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "BUTTON" || tag === "TEXTAREA") return;
+    event.preventDefault();
+    micPressed();
+  });
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = textInput.value;
+    textInput.value = "";
+    submit(value);
+  });
+
+  speakToggle.addEventListener("change", () => {
+    if (!speakToggle.checked && state === "speaking") { turn += 1; stopSpeaking(); finishTurn(); }
+  });
+
+  $("new").addEventListener("click", () => {
+    turn += 1;
+    stopListening();
+    stopSpeaking();
+    threadId = null;
+    log.replaceChildren();
+    addMessage("note", "New conversation started.");
+    setState("idle");
+  });
+
+  window.addEventListener("pagehide", () => { stopListening(); stopSpeaking(); });
+
+  // ---- start -----------------------------------------------------------------
+  if (!Recognition) {
+    mic.hidden = true;
+    $("handsfree-label").hidden = true;
+    addMessage("note", "This browser cannot recognize speech, so type your message below. For voice input, open this page in Chrome, Edge or Safari.");
+  }
+  if (!synth) $("speak-label").hidden = true;
+  else synth.getVoices(); // voices load asynchronously; ask early
+  setState("idle");
+
+  if (!token) {
+    addError("This link has no session token. Open the full link printed by `bee voice`.");
+  } else {
+    api("/api/session").then((session) => {
+      if (session.thread_id) {
+        threadId = session.thread_id;
+        addMessage("note", "Continuing your existing thread.");
+      }
+      if (session.lang) lang = session.lang;
+      document.documentElement.lang = lang;
+    }).catch((error) => addError(error.message));
+  }
+})();
+</script>
+</body>
+</html>

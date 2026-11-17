@@ -190,6 +190,13 @@ By default, data commands return markdown. Use `--json` to print raw JSON.
 
   Each send carries a `client_message_id`, generated unless you pass `--client-message-id`. It is printed with every result and in any error after which the message may have been stored. Retries reuse it, so a message is never sent twice. Re-running the same command with `--client-message-id <id>` resumes that message instead of sending a new one. That also covers a send Bee did not confirm in time, shown with `message_id: (not confirmed)`. Re-running `create` with the same id returns the same thread. Photos and files are uploaded before the message is sent; if any upload fails, nothing is sent. Attaching them requires the Bee agent consent in the Bee app.
 
+- `voice` - Talk with the Bee agent by voice in your browser (Bee test users only). Starts a page on `127.0.0.1` and prints its link; tap the microphone (or press Space), speak, and Bee's answer is shown and read aloud. Options: `--thread <thread-id>` (continue an existing thread instead of starting a new one), `--lang <tag>` (speech language such as `en-US` or `de-DE`; defaults to the browser's language), `--port N`, `--no-open` (print the link without opening a browser).
+
+  The browser does the listening and speaking, so no extra API keys or audio tools are needed. Voice input works in Chrome, Edge and Safari; in other browsers you can type and still hear the replies. **Hands-free** keeps listening after each reply, and tapping the button while Bee is thinking or speaking stops it. The conversation is a normal thread, so it also shows up in `bee threads list`.
+
+  > [!NOTE]
+  > Speech recognition is the browser's own: Chrome, Edge and Safari may send your microphone audio to their vendor's speech service to transcribe it. Only the resulting text goes to Bee. The page's link carries a one-time session token and works on your computer only, until you stop `bee voice`.
+
 - `mcp` - Run or connect the MCP server (see [Use Bee with AI assistants](#use-bee-with-ai-assistants-mcp)). Subcommands: `serve`, `serve-http [--port N] [--token VALUE]`, `connect|disconnect <claude|claude-code|codex>`, `status`.
 
 - `sync` - Export your Bee data to markdown files for AI agents. Re-runs are incremental by default (only changed daily summaries, conversations, and insights are re-fetched). Options: `--output <dir>`, `--recent-days N`, `--only <facts|todos|daily|conversations|insights>`, `--full`, `--since <epochMs>`.
