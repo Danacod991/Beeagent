@@ -207,6 +207,26 @@ By default, data commands return markdown. Use `--json` to print raw JSON.
 
   Setting `--password` (or `BEE_VOICE_PASSWORD`, at least 8 characters) also turns off the localhost-only check, so a tunnel or reverse proxy can forward to it. Wrong passwords are limited to 10 per 10 minutes.
 
+  **Deploying it to the web.** The repository has a `Dockerfile` and a `fly.toml`, so the voice agent can run as a service with its own https URL instead of in a terminal. The container needs two secrets: `BEE_TOKEN`, which authenticates as your Bee account in place of `bee login`, and `BEE_VOICE_PASSWORD`, which guards the page. Get a token by logging in locally and reading `~/.bee/token-prod` (or pass the one your Bee app's Developer Mode shows).
+
+  ```bash
+  fly launch --no-deploy --copy-config
+  fly secrets set BEE_TOKEN=... BEE_VOICE_PASSWORD=...
+  fly deploy
+  ```
+
+  Any host that runs a container and terminates https works the same way (Render, Railway, Cloud Run, a VPS behind Caddy or nginx); the image reads `PORT` and serves on `0.0.0.0`. Because the platform provides https, the microphone works on phones.
+
+  ```bash
+  docker build -t bee-voice .
+  docker run -p 8080:8080 -e BEE_TOKEN=... -e BEE_VOICE_PASSWORD=... bee-voice
+  ```
+
+  `BEE_TOKEN` works for every command, not just `voice`, which also makes the CLI usable in CI and other headless places. It is read from the environment only and never written to disk.
+
+  > [!WARNING]
+  > A deployment holds a token that can read everything in your Bee account, and it is on the public internet behind one password. Use a long random password, prefer a host that lets you keep the service private (Tailscale, Cloudflare Access, an allowlist), and delete the deployment and the token when you are done. If you only want this on your own devices, the tunnel above keeps the data on your machine.
+
   > [!WARNING]
   > The server answers as your Bee account. Anyone who reaches the address and knows the password can read your Bee data, so keep the password strong and stop the command when you are done.
 

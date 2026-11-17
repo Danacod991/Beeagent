@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearProxyConfig, loadProxyConfig, saveProxyConfig } from "@/secureStore";
+import { clearProxyConfig, loadProxyConfig, loadToken, saveProxyConfig } from "@/secureStore";
 
 describe("proxy config store", () => {
   const originalConfigDir = process.env["BEE_CONFIG_DIR"];
@@ -41,5 +41,29 @@ describe("proxy config store", () => {
     writeFileSync(join(configDir, "proxy-prod.json"), "{not-valid-json", "utf8");
 
     await expect(loadProxyConfig("prod")).resolves.toBeNull();
+  });
+});
+
+describe("BEE_TOKEN", () => {
+  const previous = process.env["BEE_TOKEN"];
+  afterEach(() => {
+    if (previous === undefined) {
+      delete process.env["BEE_TOKEN"];
+    } else {
+      process.env["BEE_TOKEN"] = previous;
+    }
+  });
+
+  it("stands in for a stored token", async () => {
+    process.env["BEE_TOKEN"] = "  env-token  ";
+    expect(await loadToken("prod")).toBe("env-token");
+    expect(await loadToken("staging")).toBe("env-token");
+  });
+
+  it("is ignored when empty or unset", async () => {
+    process.env["BEE_TOKEN"] = "   ";
+    const blank = await loadToken("prod");
+    delete process.env["BEE_TOKEN"];
+    expect(blank).toBe(await loadToken("prod"));
   });
 });

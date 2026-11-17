@@ -78,6 +78,12 @@ function clearTokenFromFile(env: Environment): void {
 }
 
 export async function loadToken(env: Environment): Promise<string | null> {
+  // A deployed server has no keychain and cannot run an interactive login, so
+  // BEE_TOKEN stands in for a stored one. It is never written to disk.
+  const fromEnv = readEnv("BEE_TOKEN")?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
   if (!isFileFallbackEnabled()) {
     try {
       const value = await Bun.secrets.get(tokenKey(env));

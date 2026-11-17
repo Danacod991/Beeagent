@@ -1,0 +1,11 @@
+.git
+.github
+.context
+node_modules
+dist
+*.md
+!README.md
+LICENSE
+bin
+scripts
+sources/**/*.test.ts

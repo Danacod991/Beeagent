@@ -1,0 +1,34 @@
+# Deploys `bee voice` to Fly.io, which terminates https in front of it.
+#
+#   fly launch --no-deploy --copy-config
+#   fly secrets set BEE_TOKEN=... BEE_VOICE_PASSWORD=...
+#   fly deploy
+#
+# Rename the app first: the name has to be unique across Fly.
+app = "bee-voice"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The page is a single long-lived session per listener, so one machine is
+  # enough; stopping it when idle keeps a personal deployment close to free.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    # The page itself needs no token, so it doubles as the health check.
+    path = "/"
+    interval = "30s"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
